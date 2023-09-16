@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "181100182443",
+    "project_id": "blank-chat-57d0e",
+    "storage_bucket": "blank-chat-57d0e.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:181100182443:android:ba5c0e8ffca773fce3f0ee",
+        "android_client_info": {
+          "package_name": "com.invorel.blankchatpro"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "181100182443-hjqpppnce9tiki1vn4nk2tq06flhnplr.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.invorel.blankchatpro",
+            "certificate_hash": "a22775ea7135d2541e050e774981998e753b7655"
+          }
+        },
+        {
+          "client_id": "181100182443-2c08ko5dchdat1kcidpe2fp4qhgb1h43.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC7xiYQJQ3qfmlgnOPFJ0UwcvkdOAKLt1Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "181100182443-2c08ko5dchdat1kcidpe2fp4qhgb1h43.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
