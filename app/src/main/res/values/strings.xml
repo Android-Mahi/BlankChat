@@ -29,6 +29,7 @@
   <string name="profile_update_failed">Profile Update Failed</string>
   <string name="no_updates_detected">No Updates Detected</string>
   <string name="contacts_permission_message">Blank chat needs the contacts\npermission to help you connect with\nfriends.Your contacts are\nuploaded using Blank’s private contact\ndiscovery, which means they are end-to-end\nencrypted and never visible to the\nBlank chat service</string>
+  <string name="home_chat_new_messages">%d New Messages</string>
 
   <!--Content Decription-->
   <string name="cd_logo">App Logo</string>
@@ -61,4 +62,6 @@
   <string name="cd_sms_send_icon">Sms Send Icon</string>
   <string name="contacts_permission_denied_rational_message">Contacts permission needed for blank Chat to show your contacts</string>
   <string name="cd_contacts_refresh_icon">Contacts Refresh icon</string>
+  <string name="cd_home_chat_receiver_profile_image">Home Chat Receiver Profile Image</string>
+  <string name="cd_starred_chat_icon">Starred Chat Icon</string>
 </resources>

@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
@@ -44,7 +46,9 @@ import androidx.compose.ui.unit.sp
 import com.invorel.blankchatpro.R.drawable
 import com.invorel.blankchatpro.R.string
 import com.invorel.blankchatpro.compose.common.BlankProfileCard
+import com.invorel.blankchatpro.compose.common.BlankSwipeableCard
 import com.invorel.blankchatpro.compose.common.HorizontalSpacer
+import com.invorel.blankchatpro.compose.common.ReceivedChatDataHolder
 import com.invorel.blankchatpro.compose.common.VerticalSpacer
 import com.invorel.blankchatpro.constants.DEFAULT_PROFILE_MAN_IMAGE
 import com.invorel.blankchatpro.extensions.isPermissionGranted
@@ -175,7 +179,51 @@ fun HomeScreen(
       )
       {
 
-        NoChatAvailable(modifier = Modifier.align(Alignment.Center))
+        val testData1 = ReceivedChatDataHolder(
+          receiverName = "SRINIVASAN",
+          receiverImage = DEFAULT_PROFILE_MAN_IMAGE,
+          isReceiverOnline = true,
+          isChatStarred = true,
+          secondaryDesc = "3 new Messages",
+          lastMessageSentOrReceivedTime = "5:45 AM"
+        )
+
+        val testData2 = ReceivedChatDataHolder(
+          receiverName = "MAHI",
+          receiverImage = DEFAULT_PROFILE_MAN_IMAGE,
+          isReceiverOnline = false,
+          isChatStarred = true,
+          secondaryDesc = "Sent",
+          lastMessageSentOrReceivedTime = "5:00 AM"
+        )
+
+        val testData3 = ReceivedChatDataHolder(
+          receiverName = "SUJAN",
+          receiverImage = DEFAULT_PROFILE_MAN_IMAGE,
+          isReceiverOnline = true,
+          isChatStarred = false,
+          secondaryDesc = "Seen",
+          lastMessageSentOrReceivedTime = "5:05 AM"
+        )
+
+        val testHomeChatList = listOf(testData1, testData2, testData3)
+
+        if (true) {
+          LazyColumn {
+            itemsIndexed(testHomeChatList) { _, item ->
+              BlankSwipeableCard(dataHolder = item, onPrivateChatSwiped = {
+                context.showToast("OnPrivate Chat Swiped")
+              }, onArchiveChatSwiped = {
+                context.showToast("OnArchive Chat Swiped")
+              })
+            }
+          }
+
+        } else {
+          NoChatAvailable(modifier = Modifier.align(Alignment.Center))
+        }
+
+
 
 
         NewChatPencilIcon(modifier = Modifier.align(Alignment.BottomEnd)) {
