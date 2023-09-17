@@ -135,6 +135,14 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
                         if (currentChatRoomId.value.isEmpty()) {
                           currentChatRoomId.value = freshCreatedRoomId
                         }
+                        FirebaseUtils.updateParticipantsDetailsInChatRoom(
+                          senderNumber = senderNumber.value,
+                          receiverNumber = receiverNumber,
+                          chatRoomId = freshCreatedRoomId,
+                          onFailed = ::updateErrorMessage,
+                          onParticipantDetailsUpdated = {
+                          // we saved participants numbers in ChatRoom
+                        })
                       })
                   }, onFailed = ::updateErrorMessage
                 )
@@ -207,6 +215,14 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
                         if (currentChatRoomId.value.isEmpty()) {
                           currentChatRoomId.value = newUserIdTypeRoomId
                         }
+                        FirebaseUtils.updateParticipantsDetailsInChatRoom(
+                          senderNumber = senderNumber.value,
+                          receiverNumber = receiverNumber,
+                          chatRoomId = newUserIdTypeRoomId,
+                          onFailed = ::updateErrorMessage,
+                          onParticipantDetailsUpdated = {
+                            // we saved participants numbers in ChatRoom
+                          })
                       })
                   }
                 )
@@ -232,6 +248,14 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
                   onFailed = ::updateErrorMessage,
                   onSuccess = {
                     // we renamed existing Number chatRoom to UserId Type and updated it's id to sender & receiver table
+                    FirebaseUtils.updateParticipantsDetailsInChatRoom(
+                      senderNumber = senderNumber.value,
+                      receiverNumber = receiverNumber,
+                      chatRoomId = newUserIdTypeRoomId,
+                      onFailed = ::updateErrorMessage,
+                      onParticipantDetailsUpdated = {
+                        // we saved participants numbers in ChatRoom
+                      })
                   }
                 )
               })

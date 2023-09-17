@@ -605,6 +605,26 @@ object FirebaseUtils {
       }
   }
 
+  fun updateParticipantsDetailsInChatRoom(
+    senderNumber: String,
+    receiverNumber: String,
+    chatRoomId: String,
+    onFailed: (String) -> Unit,
+    onParticipantDetailsUpdated: () -> Unit
+  ) {
+
+    val participantDetails = senderNumber.plus(DEFAULT_CHAT_ROOM_SEPARATOR).plus(receiverNumber)
+
+    FirebaseFirestore.getInstance()
+      .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+      .document(chatRoomId)
+      .update(mapOf(Message.participantsKey to participantDetails))
+      .addOnFailureListener { onFailed.invoke(it.message ?: "Failed to update participant details in ChatRoom") }
+      .addOnSuccessListener {
+        onParticipantDetailsUpdated.invoke()
+      }
+  }
+
   fun updateChatRoomIdsInSenderAndReceiverDetails(
     chatRoomId: String,
     senderNumber: String,
