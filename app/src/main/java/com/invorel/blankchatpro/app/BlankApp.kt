@@ -5,9 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStoreFile
-import androidx.room.Room
 import com.invorel.blankchatpro.constants.DEFAULT_DATA_STORE_FILE_NAME
-import com.invorel.blankchatpro.constants.DEFAULT_ROOM_DB_NAME
 import com.invorel.blankchatpro.constants.DataStoreManager
 import com.invorel.blankchatpro.extensions.showToast
 import com.invorel.blankchatpro.local.database.BlankLocalDatabase
@@ -22,6 +20,8 @@ class BlankApp : Application() {
 
   lateinit var localDb: BlankLocalDatabase
 
+
+
   override fun onCreate() {
     super.onCreate()
 
@@ -33,13 +33,17 @@ class BlankApp : Application() {
 
     FirebaseUtils.getCurrentFCMToken(
       onTokenFetched = { token ->
-        val manager = DataStoreManager(dataStore)
-        GlobalScope.launch {
-          manager.saveFCMToken(token)
-        }
+       saveFCMTokenInDataStore(token)
     }, onTokenFetchFailed = { errorMessage ->
       showToast(errorMessage)
     })
+  }
+
+  fun saveFCMTokenInDataStore(token: String) {
+    val manager = DataStoreManager(dataStore)
+    GlobalScope.launch {
+      manager.saveFCMToken(token)
+    }
   }
 
   override fun onTerminate() {

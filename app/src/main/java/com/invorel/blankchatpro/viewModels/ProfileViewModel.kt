@@ -46,7 +46,10 @@ class ProfileViewModel(dataStore: DataStore<Preferences>) : ViewModel() {
           updateFireBaseProfileImgUrl(storedProfileUrl)
         } else {
           if (FirebaseUtils.currentUser == null) return@collectLatest
-          getProfileImageDownloadUrlFromFirebase()
+          if (nameAndAbout.isNotEmpty()) {
+            //we are getting Image Details from Firebase only for the existing user not for the new user
+            getProfileImageDownloadUrlFromFirebase()
+          }
         }
       }
     }
@@ -126,7 +129,7 @@ class ProfileViewModel(dataStore: DataStore<Preferences>) : ViewModel() {
     }
 
     showLoading()
-    FirebaseUtils.updateNameAndAboutInFirebaseAuthUserProfile(
+    FirebaseUtils.updateChosenProfilePhotoInFbStorage(
       nameAndAbout = nameAndAbout,
       onFailed = {
         if (it.isEmpty()) {

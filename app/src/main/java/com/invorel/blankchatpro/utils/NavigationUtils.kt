@@ -5,6 +5,7 @@ import androidx.navigation.navArgument
 import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.ChatRoomId
 import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.FBUserId
 import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.FBUserImage
+import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.ImgToken
 import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.FCMToken
 import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.HasPhoneContactPhoto
 import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.IsCameFromHomeScreen
@@ -26,13 +27,14 @@ object NavigationUtils {
     PhoneContactId, //Optional
     HasPhoneContactPhoto, //Optional
     FBUserImage, //Optional
+    ImgToken, //Optional
     ChatRoomId, //Optional
     FCMToken, //Optional
     IsReceiverOnline, //Optional
   }
 
   val ChatScreenRoute =
-    "Chat/Number={$Number}/Name={$Name}/IsCameFromHomeScreen={$IsCameFromHomeScreen}/IsReceiverOnline={$IsReceiverOnline}?FBUserId={$FBUserId}&PhoneContactId={$PhoneContactId}&HasPhoneContactPhoto={$HasPhoneContactPhoto}&FBUserImage={$FBUserImage}&ChatRoomId={$ChatRoomId}&FCMToken={$FCMToken}"
+    "Chat/Number={$Number}/Name={$Name}/IsCameFromHomeScreen={$IsCameFromHomeScreen}/IsReceiverOnline={$IsReceiverOnline}?FBUserId={$FBUserId}&PhoneContactId={$PhoneContactId}&HasPhoneContactPhoto={$HasPhoneContactPhoto}&FBUserImage={$FBUserImage}&ImgToken={$ImgToken}&ChatRoomId={$ChatRoomId}&FCMToken={$FCMToken}"
 
   val chatScreenArgsList = listOf(
     navArgument(Number.name) {
@@ -60,6 +62,10 @@ object NavigationUtils {
       defaultValue = false
     },
     navArgument(FBUserImage.name) {
+      type = NavType.StringType
+      defaultValue = ""
+    },
+    navArgument(ImgToken.name) {
       type = NavType.StringType
       defaultValue = ""
     },
@@ -123,6 +129,8 @@ object NavigationUtils {
       }
 
       is ChatFromHomeList -> {
+
+        val token = if (type.userImage.isNotEmpty()) type.userImage.substringAfter("&token=") else ""
         routeStringBuilder.append("/$Number=")
           .append(type.number)
           .append("/$Name=")
@@ -136,6 +144,8 @@ object NavigationUtils {
           .append(type.userId)
           .append("&$FBUserImage=")
           .append(type.userImage)
+          .append("&$ImgToken=")
+          .append(token)
           .append("&$ChatRoomId=")
           .append(type.roomId)
           .append("&$FCMToken=")

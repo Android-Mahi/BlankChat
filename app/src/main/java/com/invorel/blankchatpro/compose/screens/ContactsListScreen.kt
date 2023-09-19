@@ -2,6 +2,7 @@ package com.invorel.blankchatpro.compose.screens
 
 import android.os.Build.VERSION_CODES
 import androidx.annotation.RequiresApi
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,12 +18,15 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,6 +40,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.invorel.blankchatpro.R.string
+import com.invorel.blankchatpro.compose.common.BackPressHandler
+import com.invorel.blankchatpro.compose.common.BlankTextField
 import com.invorel.blankchatpro.compose.common.HorizontalSpacer
 import com.invorel.blankchatpro.compose.common.VerticalSpacer
 import com.invorel.blankchatpro.constants.DEFAULT_PROFILE_MAN_IMAGE
@@ -53,39 +59,93 @@ import kotlinx.coroutines.launch
   modifier: Modifier = Modifier,
   viewModel: ContactsViewModel,
   onContactPicked: (Contact) -> Unit,
+  onBackPressed: () -> Unit
 ) {
 
   val state = viewModel.uiState.collectAsState().value
   val context = LocalContext.current
+  val filteredContacts =  remember(state.searchQuery) {
+    derivedStateOf {
+      state.contactsList.filter { it.name.contains(state.searchQuery, ignoreCase = true) || it.number.contains(state.searchQuery, ignoreCase = true) }
+    }
+  }
+
+  BackPressHandler {
+    if (state.isSearchBarState) {
+      viewModel.updateSearchQuery("")
+      viewModel.showSearchBar(false)
+    } else {
+      onBackPressed.invoke()
+    }
+  }
 
   Column(
     modifier = modifier,
   ) {
+    
+    VerticalSpacer(space = 15)
 
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      verticalAlignment = Alignment.CenterVertically
-    )
-    {
-      Text(
-        modifier = Modifier.weight(1f),
-        text = "Select Contact",
-        fontWeight = FontWeight.Bold,
-        fontSize = 30.sp,
-        textAlign = TextAlign.Center
-      )
+    AnimatedVisibility(visible = state.isSearchBarState) {
+      BlankTextField(
+        modifier = Modifier.padding(horizontal = 15.dp),
+        value = state.searchQuery,
+        hint = stringResource(string.search_contact_hint),
+        onValueChanged = { viewModel.updateSearchQuery(it) },
+        onClearClicked = { viewModel.updateSearchQuery("") },
+        showClearIcon = true,
+        onFieldUnFocused = {})
+    }
 
-      Icon(
-        modifier = Modifier.padding(end = 15.dp)
-          .size(24.dp)
-          .clickableWithoutRipple {
-            viewModel.clearExistingContacts()
-            viewModel.updateActionRefreshContacts(true)
-          },
-        imageVector = Icons.Filled.Refresh,
-        contentDescription = stringResource(string.cd_contacts_refresh_icon),
-        tint = white
+    AnimatedVisibility(visible = state.isSearchBarState.not()) {
+
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 15.dp),
+        verticalAlignment = Alignment.CenterVertically
       )
+      {
+        Text(
+          modifier = Modifier.weight(1f),
+          text = stringResource(string.pick_contact),
+          fontWeight = FontWeight.Bold,
+          fontSize = 25.sp,
+          textAlign = TextAlign.Start
+        )
+
+        AnimatedVisibility(visible = state.fetchInProgress.not()) {
+          Icon(
+            modifier = Modifier
+              .padding(end = 15.dp)
+              .size(24.dp)
+              .clickableWithoutRipple {
+                viewModel.showSearchBar(true)
+              },
+            imageVector = Icons.Filled.Search,
+            contentDescription = stringResource(string.cd_contacts_refresh_icon),
+            tint = white
+          )
+        }
+
+        HorizontalSpacer(space = 10)
+
+        AnimatedVisibility(visible = state.fetchInProgress.not()) {
+          Icon(
+            modifier = Modifier
+              .padding(end = 15.dp)
+              .size(24.dp)
+              .clickableWithoutRipple {
+                viewModel.clearExistingContacts()
+                viewModel.updateActionRefreshContacts(true)
+              },
+            imageVector = Icons.Filled.Refresh,
+            contentDescription = stringResource(string.cd_contacts_refresh_icon),
+            tint = white
+          )
+
+        }
+      }
+
     }
 
     VerticalSpacer(space = 25)
@@ -106,7 +166,7 @@ import kotlinx.coroutines.launch
         }
       } else {
         LazyColumn(modifier = Modifier.background(black)) {
-          itemsIndexed(state.contactsList) { _, item ->
+          itemsIndexed(filteredContacts.value) { _, item ->
             ContactItem(
               modifier = Modifier,
               data = item,

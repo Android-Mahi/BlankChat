@@ -64,4 +64,6 @@
   <string name="cd_contacts_refresh_icon">Contacts Refresh icon</string>
   <string name="cd_home_chat_receiver_profile_image">Home Chat Receiver Profile Image</string>
   <string name="cd_starred_chat_icon">Starred Chat Icon</string>
+  <string name="pick_contact">Pick Contact</string>
+  <string name="search_contact_hint">Search Your Contact</string>
 </resources>

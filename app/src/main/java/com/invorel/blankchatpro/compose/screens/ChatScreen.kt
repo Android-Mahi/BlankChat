@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.view.ViewTreeObserver
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -37,7 +36,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.ContentScale.Companion
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -50,23 +48,24 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.invorel.blankchatpro.constants.DEFAULT_PROFILE_MAN_IMAGE
+import com.invorel.blankchatpro.R.drawable
 import com.invorel.blankchatpro.R.string
 import com.invorel.blankchatpro.compose.common.BlankMoreIcon
 import com.invorel.blankchatpro.compose.common.BlankTextField
 import com.invorel.blankchatpro.compose.common.HorizontalSpacer
 import com.invorel.blankchatpro.compose.common.VerticalSpacer
+import com.invorel.blankchatpro.constants.DEFAULT_PROFILE_MAN_IMAGE
 import com.invorel.blankchatpro.extensions.showToast
+import com.invorel.blankchatpro.extensions.trimNameToMaxLength
+import com.invorel.blankchatpro.online.fb_collections.Message
 import com.invorel.blankchatpro.ui.theme.black
 import com.invorel.blankchatpro.ui.theme.darkGrey
 import com.invorel.blankchatpro.ui.theme.lightGrey1
 import com.invorel.blankchatpro.ui.theme.white
 import com.invorel.blankchatpro.ui.theme.white1
-import com.invorel.blankchatpro.viewModels.ChatsViewModel
-import com.invorel.blankchatpro.R.drawable
-import com.invorel.blankchatpro.online.fb_collections.Message
 import com.invorel.blankchatpro.utils.FirebaseUtils
 import com.invorel.blankchatpro.viewModels.ChatReceiverDetails
+import com.invorel.blankchatpro.viewModels.ChatsViewModel
 
 @SuppressLint("UnrememberedMutableInteractionSource")
 @Composable
@@ -85,7 +84,7 @@ fun ChatScreen(
   val chatListState = rememberLazyListState()
 
   LaunchedEffect(Unit) {
-    viewModel.updateReceiverDetails(receiverDetails)
+    viewModel.updateReceiverDetails(receiverDetails, localContactPhoto)
     if (chatRoomId.isNotEmpty()) {
       //Comes from Home Screen
       viewModel.updateChatRoomId(chatRoomId)
@@ -171,17 +170,21 @@ fun ChatScreen(
 
       HorizontalSpacer(space = 6)
 
-      Image(
+      val disableSendButton = state.currentMessage.message.isEmpty() || state.isMessageUpdateInProgress
+
+      Icon(
         modifier = Modifier
           .size(35.dp)
           .clickable(indication = null, interactionSource = MutableInteractionSource(), onClick = {
-            viewModel.updateCurrentMessageInBackEnd()
+            if (disableSendButton.not()) {
+              viewModel.updateCurrentMessageInBackEnd()
+            }
           }),
         painter = painterResource(id = drawable.sms_send_ic),
         contentDescription = stringResource(
           string.cd_sms_send_icon
         ),
-        contentScale = ContentScale.Crop
+        tint = if (disableSendButton) darkGrey else white
       )
 
     }
@@ -245,7 +248,7 @@ fun ChatScreenContactInfo(
     Column {
 
       Text(
-        text = receiverDetails.name,
+        text = receiverDetails.name.trimNameToMaxLength(),
         fontSize = 20.sp,
         color = black,
         textAlign = TextAlign.Center

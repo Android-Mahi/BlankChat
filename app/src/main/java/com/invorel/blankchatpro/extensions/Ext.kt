@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.core.app.ActivityCompat
+import com.invorel.blankchatpro.constants.RECEIVER_NAME_MAX_LENGTH_IN_CHAT
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 
@@ -39,7 +40,8 @@ fun Activity.isRationaleDialogNeeded(permission: String) =
 }
 
 fun String.buildProperPhoneNumber(): String {
-  val cleanedNumber = this.replace("[^0-9+]".toRegex(), "").replace("\\s".toRegex(), "") // Remove non-digit, non-plus, and white space characters
+  val cleanedNumber = this.replace("[^0-9+]".toRegex(), "")
+    .replace("\\s".toRegex(), "") // Remove non-digit, non-plus, and white space characters
   return if (!cleanedNumber.startsWith("+91")) {
     // Add +91 if it doesn't exist
     "+91$cleanedNumber"
@@ -53,3 +55,5 @@ fun String.buildProperPhoneNumber(): String {
     }
   }
 }
+
+fun String.trimNameToMaxLength() = this.take(RECEIVER_NAME_MAX_LENGTH_IN_CHAT).plus("..")

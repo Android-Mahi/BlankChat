@@ -127,7 +127,7 @@ object FirebaseUtils {
     }
   }
 
-  fun updateNameAndAboutInFirebaseAuthUserProfile(
+  fun updateChosenProfilePhotoInFbStorage(
     nameAndAbout: String,
     onSuccess: () -> Unit,
     onFailed: (String) -> Unit,
@@ -157,14 +157,14 @@ object FirebaseUtils {
 
     checkIfProfileImageAlreadyExistsInFireBase(onNoImageExists = {
       // we can upload this fresh Image
-      updateNameAndAboutInFirebaseAuthUserProfile(
+      updateChosenProfilePhotoInFbStorage(
         imageUri = imageUri,
         onProfileImageUploaded = onProfileImageUploaded,
         onProfileImageUploadFailed = onProfileImageUploadFailed
       )
     }, onImageDeleted = {
       // we can upload this new image
-      updateNameAndAboutInFirebaseAuthUserProfile(
+      updateChosenProfilePhotoInFbStorage(
         imageUri = imageUri,
         onProfileImageUploaded = onProfileImageUploaded,
         onProfileImageUploadFailed = onProfileImageUploadFailed
@@ -174,12 +174,12 @@ object FirebaseUtils {
     })
   }
 
-  private fun updateNameAndAboutInFirebaseAuthUserProfile(
+  private fun updateChosenProfilePhotoInFbStorage(
     imageUri: Uri,
     onProfileImageUploaded: (String) -> Unit,
     onProfileImageUploadFailed: (String) -> Unit,
   ) {
-    profileImageStorageRef.putFile(imageUri).addOnSuccessListener {
+    currentUserProfileImageStorageRef.putFile(imageUri).addOnSuccessListener {
       getDownloadUrlOfUploadedImage(onDownloadUrlFetched = { downloadUrl ->
         onProfileImageUploaded.invoke(downloadUrl)
       }, onDownloadUrlFetchFailed = { errorMessage ->
@@ -195,7 +195,7 @@ object FirebaseUtils {
     onNoImageExists: () -> Unit,
     onError: (String) -> Unit,
   ) {
-    profileImageStorageRef.list(1).addOnSuccessListener { resultList ->
+    currentUserProfileImageStorageRef.list(1).addOnSuccessListener { resultList ->
       if (resultList.items.isEmpty()) {
         //No Previous  UploadedImage
         onNoImageExists.invoke()
@@ -216,7 +216,7 @@ object FirebaseUtils {
     onExistingImageDeleted: () -> Unit,
     onExistingImageDeleteFailed: (String) -> Unit,
   ) {
-    profileImageStorageRef.delete().addOnSuccessListener {
+    currentUserProfileImageStorageRef.delete().addOnSuccessListener {
       onExistingImageDeleted.invoke()
     }.addOnFailureListener {
       onExistingImageDeleteFailed.invoke(it.message ?: "Delete Failed")
@@ -227,23 +227,27 @@ object FirebaseUtils {
     onDownloadUrlFetched: (String) -> Unit,
     onDownloadUrlFetchFailed: (String) -> Unit,
   ) {
-    profileImageStorageRef.downloadUrl.addOnSuccessListener { downloadUrl ->
+    currentUserProfileImageStorageRef.downloadUrl.addOnSuccessListener { downloadUrl ->
       onDownloadUrlFetched.invoke(downloadUrl.toString())
     }.addOnFailureListener { e ->
-
-      onDownloadUrlFetchFailed.invoke(e.message ?: "Unable to get Download Url")
+      //onDownloadUrlFetchFailed.invoke(e.message ?: "Unable to get Download Url")
+      onDownloadUrlFetchFailed.invoke("update your nice photo")
     }
   }
 
-  private val profileImageStorageRef: StorageReference
+  private val currentUserProfileImageStorageRef: StorageReference
     get() = FirebaseStorage.getInstance().reference.child(
       DEFAULT_DIRECTORY_NAME_FOR_PROFILE_IN_FIREBASE
-    ).child(getDefaultProfileImageName())
+    ).child(getDefaultSenderProfileImageName())
 
-  private fun getDefaultProfileImageName(): String {
+  private fun getDefaultSenderProfileImageName(): String {
     with(currentUser!!) {
       return uid.plus(".jpg")
     }
+  }
+
+  private fun getDefaultReceiverProfileImageName(mobileNumber: String): String {
+    return mobileNumber.plus(".jpg")
   }
 
   fun logOutUser() {
@@ -329,7 +333,7 @@ object FirebaseUtils {
     mobileNumber: String,
     name: String,
     about: String,
-    gender: Byte,
+    gender: Int,
     profilePhoto: String,
     onUserDetailsUpdated: () -> Unit,
     onFailed: (String) -> Unit,
@@ -1102,6 +1106,29 @@ object FirebaseUtils {
         } else {
           onMessageUpdated.invoke()
         }
+      }
+  }
+
+  fun uploadReceiverPhotoInFireBaseWithByteArray(
+    receiverNumber: String,
+    photoData: ByteArray,
+    onFailed: (String) -> Unit,
+    onSuccess: (String) -> Unit
+  ) {
+    val imageRef = FirebaseStorage.getInstance().reference.child(
+      DEFAULT_DIRECTORY_NAME_FOR_PROFILE_IN_FIREBASE
+    ).child(getDefaultReceiverProfileImageName(receiverNumber))
+
+    imageRef.putBytes(photoData)
+      .addOnSuccessListener {
+        imageRef.downloadUrl.addOnSuccessListener { downloadUrl ->
+          onSuccess.invoke(downloadUrl.toString())
+        }.addOnFailureListener { e ->
+          onFailed.invoke(e.message ?: "Unable to get Download Url of Receiver Local Photo")
+        }
+      }
+      .addOnFailureListener {
+        onFailed.invoke(it.message ?: "Failed to upload contact byteArray in Firebase")
       }
   }
 

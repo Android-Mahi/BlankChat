@@ -1,5 +1,6 @@
 package com.invorel.blankchatpro.viewModels
 
+import android.graphics.Bitmap
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -7,12 +8,16 @@ import com.invorel.blankchatpro.constants.DEFAULT_CHAT_ROOM_SEPARATOR
 import com.invorel.blankchatpro.local.database.BlankLocalDatabase
 import com.invorel.blankchatpro.online.fb_collections.Message
 import com.invorel.blankchatpro.state.ChatsUiState
+import com.invorel.blankchatpro.utils.BitMapUtils
 import com.invorel.blankchatpro.utils.FirebaseUtils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel() {
 
@@ -26,6 +31,12 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
 
   private val currentChatRoomId = MutableStateFlow("")
   private val lastMessageId = MutableStateFlow(1)
+
+  private val localReceiverContactPhoto = MutableStateFlow<Bitmap?>(null)
+
+  private fun updateLocalReceiverContactPhoto(bitmap: Bitmap?) {
+    localReceiverContactPhoto.value = bitmap
+  }
 
   fun updateSenderDetails() {
     if (FirebaseUtils.currentUser == null) {
@@ -43,7 +54,8 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
     updateSenderIdInMessage(senderId.value!!)
   }
 
-  fun updateReceiverDetails(receiverDetails: ChatReceiverDetails) {
+  fun updateReceiverDetails(receiverDetails: ChatReceiverDetails, localContactPhoto: Bitmap?) {
+    updateLocalReceiverContactPhoto(localContactPhoto)
     receiverContactDetails.value = receiverDetails
     updateReceiverIdInMessage(receiverDetails.userId)
   }
@@ -133,6 +145,8 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
 
     updateSentTimeInMessage(System.currentTimeMillis())
 
+    updateMessageInProgress(true)
+
     viewModelScope.launch {
       if (currentChatRoomId.value.isEmpty()) {
 
@@ -161,6 +175,8 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
           return@launch
         }
 
+        updateMessageInProgress(true)
+
         createChatRoomAndUpdateMessage(
           receiverNumber = receiverContactDetails.value!!.number,
           receiverName = receiverContactDetails.value!!.name,
@@ -169,6 +185,7 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
           senderUid = senderId.value!!,
           message = uiState.value.currentMessage.copy(message = uiState.value.currentMessage.message.trim()),
           onMessageUpdatedInBackEnd = {
+            updateMessageInProgress(false)
             addMessageInCurrentList(it)
             incrementLastMessageId()
             clearLastMessageDetails()
@@ -178,9 +195,11 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
         // we have created the chatRoom sent the first message. so we can hope the message id will be 1 for the first message
         //updateLastMessageId(1)
       } else {
+        updateMessageInProgress(true)
         updateCurrentMessageInBackEndChatRoom(
           message = uiState.value.currentMessage.copy(message = uiState.value.currentMessage.message.trim()),
           onMessageAddedInCurrentChatRoom = {
+            updateMessageInProgress(false)
             addMessageInCurrentList(it)
             incrementLastMessageId()
             clearLastMessageDetails()
@@ -213,6 +232,7 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
     }
   }
 
+  @OptIn(ExperimentalCoroutinesApi::class)
   private suspend fun createChatRoomAndUpdateMessage(
     receiverNumber: String,
     receiverName: String,
@@ -232,62 +252,90 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
       mobileNumber = receiverNumber,
       onFailed = ::updateErrorMessage,
       onReceiverNotExists = {
-        //Todo First upload contactPhoto to FB Storage if exists & use as profile photo in line no 113
 
-        FirebaseUtils.createChatRoomInFirebase(
-          chatRoomId = senderNumber.plus(DEFAULT_CHAT_ROOM_SEPARATOR).plus(receiverNumber),
-          //Todo get org switch status and use here
-          message = message,
-          onChatRoomCreated = { freshCreatedRoomId ->
-            val receiverChatRoomIds = mutableListOf<String>()
-            receiverChatRoomIds.add(freshCreatedRoomId)
-            viewModelScope.launch {
-              delay(50)
-            }
-            FirebaseUtils.createNotLoggedInReceiverDetailsInDB(
-              mobileNumber = receiverNumber,
-              name = receiverName,
-              photo = "",
-              chatRoomIds = receiverChatRoomIds,
-              onFailed = ::updateErrorMessage,
-              onNotLoggedInReceiverCreated = {
-                //Getting existing Room Ids for the Sender (current User)
-                FirebaseUtils.getExistingChatRoomIdsForUser(
-                  mobileNumber = senderNumber,
-                  onExistingChatRoomIdsFetched = { oldRoomIds ->
-                    val senderChatRoomIds = mutableListOf<String>()
-                    senderChatRoomIds.addAll(oldRoomIds)
-                    senderChatRoomIds.add(freshCreatedRoomId)
-                    viewModelScope.launch {
-                      delay(50)
-                    }
-                    //update latest room Ids appended with old Ids in Firebase
-                    FirebaseUtils.updateChatRoomIdInSendUserDocument(
-                      senderChatRoomIds,
-                      onFailed = ::updateErrorMessage,
-                      onChatRoomIdsUpdated = {
-                        // we updated chat room in Both receiver and sender
-                        if (currentChatRoomId.value.isEmpty()) {
-                          updateChatRoomId(freshCreatedRoomId)
-                        }
-                        FirebaseUtils.updateParticipantsDetailsInChatRoom(
-                          senderNumber = senderNumber,
-                          receiverNumber = receiverNumber,
-                          chatRoomId = freshCreatedRoomId,
-                          onFailed = ::updateErrorMessage,
-                          onParticipantDetailsUpdated = {
-                            // we saved participants numbers in ChatRoom
-                            onMessageUpdatedInBackEnd.invoke(message)
-                          })
-                      })
-                  }, onFailed = ::updateErrorMessage
-                )
 
+        viewModelScope.launch {
+          val receiverImageUrl = suspendCancellableCoroutine { continuation ->
+            val receiverPhotoUpload = viewModelScope.async {
+              if (localReceiverContactPhoto.value != null) {
+                val photoData =
+                  BitMapUtils.convertBitMapToByteArray(localReceiverContactPhoto.value!!)
+                FirebaseUtils.uploadReceiverPhotoInFireBaseWithByteArray(
+                  receiverNumber,
+                  photoData,
+                  onFailed = ::updateErrorMessage,
+                  onSuccess = { imageUrl ->
+                    continuation.resume(imageUrl, onCancellation = null)
+                  })
+              } else {
+                continuation.resume("", onCancellation = null)
               }
-            )
-          },
-          onChatRoomCreateFailed = ::updateErrorMessage
-        )
+            }
+            continuation.invokeOnCancellation {
+              receiverPhotoUpload.cancel()
+            }
+          }
+
+          FirebaseUtils.createChatRoomInFirebase(
+            chatRoomId = senderNumber.plus(DEFAULT_CHAT_ROOM_SEPARATOR).plus(receiverNumber),
+            //Todo get org switch status and use here
+            message = message,
+            onChatRoomCreated = { freshCreatedRoomId ->
+              val receiverChatRoomIds = mutableListOf<String>()
+              receiverChatRoomIds.add(freshCreatedRoomId)
+              viewModelScope.launch {
+                delay(50)
+              }
+              FirebaseUtils.createNotLoggedInReceiverDetailsInDB(
+                mobileNumber = receiverNumber,
+                name = receiverName,
+                photo = receiverImageUrl,
+                chatRoomIds = receiverChatRoomIds,
+                onFailed = ::updateErrorMessage,
+                onNotLoggedInReceiverCreated = {
+                  //Getting existing Room Ids for the Sender (current User)
+                  FirebaseUtils.getExistingChatRoomIdsForUser(
+                    mobileNumber = senderNumber,
+                    onExistingChatRoomIdsFetched = { oldRoomIds ->
+                      val senderChatRoomIds = mutableListOf<String>()
+                      senderChatRoomIds.addAll(oldRoomIds)
+                      senderChatRoomIds.add(freshCreatedRoomId)
+                      viewModelScope.launch {
+                        delay(50)
+                      }
+                      //update latest room Ids appended with old Ids in Firebase
+                      FirebaseUtils.updateChatRoomIdInSendUserDocument(
+                        senderChatRoomIds,
+                        onFailed = ::updateErrorMessage,
+                        onChatRoomIdsUpdated = {
+                          // we updated chat room in Both receiver and sender
+                          if (currentChatRoomId.value.isEmpty()) {
+                            updateChatRoomId(freshCreatedRoomId)
+                          }
+                          FirebaseUtils.updateParticipantsDetailsInChatRoom(
+                            senderNumber = senderNumber,
+                            receiverNumber = receiverNumber,
+                            chatRoomId = freshCreatedRoomId,
+                            onFailed = ::updateErrorMessage,
+                            onParticipantDetailsUpdated = {
+                              // we saved participants numbers in ChatRoom
+                              onMessageUpdatedInBackEnd.invoke(message)
+                            })
+                        })
+                    }, onFailed = ::updateErrorMessage
+                  )
+
+                }
+              )
+            },
+            onChatRoomCreateFailed = ::updateErrorMessage
+          )
+        }
+
+
+
+
+
       },
       onReceiverExistsWithoutLogin = {
         //No need to create
@@ -441,11 +489,8 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
     }
   }
 
-  fun showLoading() {
-    _uiState.value = _uiState.value.copy(fetchInProgress = true)
+  private fun updateMessageInProgress(value: Boolean) {
+    _uiState.value = _uiState.value.copy(isMessageUpdateInProgress = value)
   }
 
-  fun hideLoading() {
-    _uiState.value = _uiState.value.copy(fetchInProgress = false)
-  }
 }

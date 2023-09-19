@@ -41,6 +41,7 @@ import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.FBUserId
 import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.FBUserImage
 import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.FCMToken
 import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.HasPhoneContactPhoto
+import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.ImgToken
 import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.IsCameFromHomeScreen
 import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.IsReceiverOnline
 import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.Name
@@ -188,7 +189,9 @@ fun RootCompose(
                   inclusive = true
                 }
               }
-            })
+            },
+            onBackPressed = { navController.popBackStack() }
+            )
         }
 
         composable(
@@ -217,17 +220,21 @@ fun RootCompose(
             )
           }
 
-          val fbProfileImage = backStackEntry.arguments!!.getString(FBUserImage.name).orEmpty()
+          val fbProfileImage  = backStackEntry.arguments!!.getString(FBUserImage.name).orEmpty()
+          val imgToken = backStackEntry.arguments!!.getString(ImgToken.name).orEmpty()
           val chatRoomId = backStackEntry.arguments!!.getString(ChatRoomId.name).orEmpty()
           val fcmToken = backStackEntry.arguments!!.getString(FCMToken.name).orEmpty()
           val isReceiverOnline = backStackEntry.arguments!!.getBoolean(IsReceiverOnline.name, false)
+
+          val urlWithoutSpace = if (fbProfileImage.isNotEmpty()) fbProfileImage.plus("&token=").plus(imgToken) else ""
+          val finalImgUrl = if (urlWithoutSpace.isNotEmpty()) urlWithoutSpace.replace("/Profile_Pictures/+", "/Profile_Pictures%2F%2B") else ""
 
           val receiverDetails = ChatReceiverDetails(
             name = contactName,
             number = contactNumber,
             userId = fBUSerId,
             fcmToken = fcmToken,
-            photo = fbProfileImage,
+            photo = finalImgUrl,
             isReceiverOnline = isReceiverOnline
           )
 

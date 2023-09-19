@@ -42,3 +42,6 @@ const val DEFAULT__MESSAGE_COLLECTION_NAME = "MESSAGES"
 //Firebase Documents
 const val DEFAULT_MESSAGE_DOCUMENT_NAME = "MESSAGE"
 
+//max Length
+const val RECEIVER_NAME_MAX_LENGTH_IN_CHAT = 15
+

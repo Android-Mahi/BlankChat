@@ -57,8 +57,16 @@ class ContactsViewModel(private val localDatabase: BlankLocalDatabase) : ViewMod
     _uiState.value = _uiState.value.copy(fetchInProgress = true)
   }
 
-  fun hideLoading() {
+  private fun hideLoading() {
     _uiState.value = _uiState.value.copy(fetchInProgress = false)
+  }
+
+  fun showSearchBar(value: Boolean) {
+    _uiState.value = _uiState.value.copy(isSearchBarState = value)
+  }
+
+  fun updateSearchQuery(query: String) {
+    _uiState.value = _uiState.value.copy(searchQuery = query)
   }
 
 }

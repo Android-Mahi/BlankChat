@@ -131,7 +131,8 @@ fun BlankTextField(
             interactionSource = MutableInteractionSource(),
             onClick = { onClearClicked.invoke() }),
         imageVector = Icons.Outlined.Clear,
-        contentDescription = stringResource(id = string.cd_clear_icon)
+        contentDescription = stringResource(id = string.cd_clear_icon),
+        tint = black
       )
     }
 

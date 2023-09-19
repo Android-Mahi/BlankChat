@@ -5,7 +5,9 @@ import android.graphics.Bitmap
 data class ContactUiState(
   val contactsList: List<Contact> = listOf(),
   val actionFetchContacts: Boolean = false,
-  val fetchInProgress: Boolean = false
+  val fetchInProgress: Boolean = false,
+  val isSearchBarState: Boolean = false,
+  val searchQuery: String = "",
 )
 
 data class Contact(
