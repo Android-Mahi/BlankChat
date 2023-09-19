@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -32,13 +33,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.ContentScale.Companion
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -66,7 +67,6 @@ import com.invorel.blankchatpro.R.drawable
 import com.invorel.blankchatpro.online.fb_collections.Message
 import com.invorel.blankchatpro.utils.FirebaseUtils
 import com.invorel.blankchatpro.viewModels.ChatReceiverDetails
-import kotlinx.coroutines.launch
 
 @SuppressLint("UnrememberedMutableInteractionSource")
 @Composable
@@ -82,18 +82,25 @@ fun ChatScreen(
 
   val context = LocalContext.current
   val state = viewModel.uiState.collectAsState().value
-  val scope = rememberCoroutineScope()
+  val chatListState = rememberLazyListState()
 
   LaunchedEffect(Unit) {
     viewModel.updateReceiverDetails(receiverDetails)
     if (chatRoomId.isNotEmpty()) {
+      //Comes from Home Screen
       viewModel.updateChatRoomId(chatRoomId)
       viewModel.getMessagesOfCurrentChatRoomInBackend()
+    } else {
+      //Comes from Contacts Screen
+      //Todo check if the picked users already exists in Home Chat. if yes load previous messages
+      viewModel.clearPreviousChatDetails()
     }
-    //Todo handle the useCase of user picks the already chat exists contact in Contacts List Screen
-    if (isCameFromHomeScreen.not() && chatRoomId.isEmpty()) {
-      // User Opened chat from Contacts Picking Screen
-      //viewModel.checkReceiverDetailsAndCreateChatRoomInBackendIfNeeded()
+  }
+
+  //Navigates to the last message in chat
+  LaunchedEffect(state.messagesList) {
+    if (state.messagesList.isNotEmpty()){
+      chatListState.scrollToItem(state.messagesList.lastIndex)
     }
   }
 
@@ -131,8 +138,6 @@ fun ChatScreen(
 
     VerticalSpacer(space = 20)
 
-    val chatListState = rememberLazyListState()
-
     LazyColumn(
       state = chatListState,
       modifier = Modifier
@@ -155,10 +160,6 @@ fun ChatScreen(
         modifier = Modifier.weight(1f),
         value = state.currentMessage.message,
         onValueChanged = {
-          val messageList = state.messagesList
-          scope.launch {
-            if (messageList.isNotEmpty()) chatListState.scrollToItem(messageList.lastIndex)
-          }
           viewModel.updateCurrentMessage(viewModel.uiState.value.currentMessage.copy(message = it))
         },
         onClearClicked = { },
@@ -284,6 +285,8 @@ fun MessageItem(
     mutableStateOf(false)
   }
 
+  val maxDeviceWidth = LocalConfiguration.current.screenWidthDp
+
   if (FirebaseUtils.currentUser == null) {
     context.showToast("Got Current User null from FB")
     return
@@ -307,6 +310,7 @@ fun MessageItem(
 
       Box(
         modifier = modifier
+          .widthIn(max = (maxDeviceWidth * 0.6f).dp)
           .background(
             if (isCurrentUserSentMessage) darkGrey else white1,
             shape = RoundedCornerShape(10.dp)

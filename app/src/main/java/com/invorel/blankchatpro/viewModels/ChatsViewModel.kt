@@ -28,7 +28,6 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
   private val lastMessageId = MutableStateFlow(1)
 
   fun updateSenderDetails() {
-
     if (FirebaseUtils.currentUser == null) {
       updateErrorMessage("Got Firebase Current User as null")
       return
@@ -42,6 +41,20 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
     senderNumber.value = FirebaseUtils.currentUser!!.phoneNumber!!
     senderId.value = FirebaseUtils.currentUser!!.uid
     updateSenderIdInMessage(senderId.value!!)
+  }
+
+  fun updateReceiverDetails(receiverDetails: ChatReceiverDetails) {
+    receiverContactDetails.value = receiverDetails
+    updateReceiverIdInMessage(receiverDetails.userId)
+  }
+
+  private fun updateReceiverId(userId: String) {
+    if(receiverContactDetails.value == null) {
+      updateErrorMessage("Got receiverContactDetails null in ChatsViewModel")
+      return
+    }
+    receiverContactDetails.value = receiverContactDetails.value!!.copy(userId = userId)
+    updateReceiverIdInMessage(userId)
   }
 
   private fun updateLastMessageId(id: Int) {
@@ -80,19 +93,6 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
     _uiState.value = _uiState.value.copy(messagesList = newList)
   }
 
-  private fun updateReceiverId(userId: String) {
-    if(receiverContactDetails.value == null) {
-      updateErrorMessage("Got receiverContactDetails null in ChatsViewModel")
-      return
-    }
-    receiverContactDetails.value = receiverContactDetails.value!!.copy(userId = userId)
-    updateReceiverIdInMessage(userId)
-  }
-
-  fun updateReceiverDetails(receiverDetails: ChatReceiverDetails) {
-    receiverContactDetails.value = receiverDetails
-  }
-
   private fun incrementLastMessageId() {
     updateLastMessageId(lastMessageId.value+1)
   }
@@ -111,6 +111,15 @@ class ChatsViewModel(private val localDatabase: BlankLocalDatabase) : ViewModel(
 
   fun updateChatRoomId(roomId: String) {
     currentChatRoomId.value = roomId
+  }
+
+  fun clearPreviousChatDetails() {
+   updateLastMessageId(1)
+    currentChatRoomId.value = ""
+    if (uiState.value.messagesList.isNotEmpty()) {
+      uiState.value.messagesList = listOf()
+    }
+    clearLastMessageDetails()
   }
 
   fun updateCurrentMessageInBackEnd() {

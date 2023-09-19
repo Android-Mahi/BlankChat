@@ -236,9 +236,9 @@ fun RootCompose(
             receiverDetails = receiverDetails,
             chatRoomId = chatRoomId,
             viewModel = chatsViewModel,
-            onBackClick = {
-            navController.popBackStack()
-          }, isCameFromHomeScreen =  isCameFromHomeScreen
+            onBackClick = { navController.popBackStack() },
+            //Todo remove below flag if it is not needed
+            isCameFromHomeScreen =  isCameFromHomeScreen
           )
         }
 
