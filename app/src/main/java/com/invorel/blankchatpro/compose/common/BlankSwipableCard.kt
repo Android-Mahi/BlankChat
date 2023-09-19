@@ -35,6 +35,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -46,28 +47,34 @@ import coil.compose.AsyncImage
 import com.invorel.blankchatpro.R.drawable
 import com.invorel.blankchatpro.R.string
 import com.invorel.blankchatpro.compose.common.SwipeCardStatus.DEFAULT
+import com.invorel.blankchatpro.compose.screens.ChatRoomDataHolder
 import com.invorel.blankchatpro.constants.DEFAULT_PROFILE_MAN_IMAGE
+import com.invorel.blankchatpro.extensions.clickableWithoutRipple
+import com.invorel.blankchatpro.extensions.showToast
 import com.invorel.blankchatpro.ui.theme.black
 import com.invorel.blankchatpro.ui.theme.btn_end_color
 import com.invorel.blankchatpro.ui.theme.darkGrey
 import com.invorel.blankchatpro.ui.theme.lightGrey
+import com.invorel.blankchatpro.utils.FirebaseUtils
+import com.invorel.blankchatpro.viewModels.HomeChatUIModel
 import kotlinx.coroutines.launch
 
 @SuppressLint("CoroutineCreationDuringComposition")
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun BlankSwipeableCard(
+fun BlankSwipeAbleCard(
   modifier: Modifier = Modifier,
-  dataHolder: ReceivedChatDataHolder,
+  homeChatUIModel: HomeChatUIModel,
   onPrivateChatSwiped: () -> Unit,
   onArchiveChatSwiped: (() -> Unit),
+  onChatClicked: (ChatRoomDataHolder) -> Unit,
 ) {
   val scope = rememberCoroutineScope()
 
   val swipeAbleState = remember {
     AnchoredDraggableState(
       initialValue = DEFAULT,
-      animationSpec = tween(150),
+      animationSpec = tween(100),
       velocityThreshold = { 125f },
       positionalThreshold = { it * 0.6f }
     )
@@ -105,7 +112,16 @@ fun BlankSwipeableCard(
 
   /* This surface is for action card which is below the main card */
 
-  Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+  Box(modifier = modifier
+    .fillMaxSize()
+    .clickableWithoutRipple {
+      onChatClicked.invoke(
+        ChatRoomDataHolder(
+          roomId = homeChatUIModel.roomId,
+          receiverDetails = homeChatUIModel.receiverDetails
+        ),
+      )
+    }, contentAlignment = Alignment.Center) {
 
     Surface(
       color = Color.Transparent,
@@ -137,25 +153,24 @@ fun BlankSwipeableCard(
         }
 
     ) {
-
-      if (swipeAbleState.currentValue == SwipeCardStatus.LEFT && !swipeAbleState.isAnimationRunning) {
-        onPrivateChatSwiped.invoke()
-        scope.launch {
-          swipeEnabled.value = false
-          swipeAbleState.animateTo(DEFAULT)
-          swipeEnabled.value = true
-        }
-      } else if (swipeAbleState.currentValue == SwipeCardStatus.RIGHT && !swipeAbleState.isAnimationRunning) {
-        onArchiveChatSwiped.invoke()
-        scope.launch {
-          swipeEnabled.value = false
-          swipeAbleState.animateTo(DEFAULT)
-          swipeEnabled.value = true
-        }
-      }
-
       swipeLeftCardVisible.value = swipeAbleState.offset <= 0
-      MainCard(dataHolder = dataHolder)
+      MainCard(dataHolder = homeChatUIModel)
+    }
+
+    if (swipeAbleState.currentValue == SwipeCardStatus.LEFT && !swipeAbleState.isAnimationRunning) {
+      onPrivateChatSwiped.invoke()
+      scope.launch {
+        swipeEnabled.value = false
+        swipeAbleState.animateTo(DEFAULT)
+        swipeEnabled.value = true
+      }
+    } else if (swipeAbleState.currentValue == SwipeCardStatus.RIGHT && !swipeAbleState.isAnimationRunning) {
+      onArchiveChatSwiped.invoke()
+      scope.launch {
+        swipeEnabled.value = false
+        swipeAbleState.animateTo(DEFAULT)
+        swipeEnabled.value = true
+      }
     }
 
   }
@@ -164,8 +179,11 @@ fun BlankSwipeableCard(
 @Composable
 fun MainCard(
   modifier: Modifier = Modifier,
-  dataHolder: ReceivedChatDataHolder,
+  dataHolder: HomeChatUIModel,
 ) {
+
+  val context = LocalContext.current
+
   Surface(
     modifier = modifier
       .fillMaxWidth()
@@ -185,7 +203,7 @@ fun MainCard(
 
       AsyncImage(
         modifier = Modifier.size(56.dp),
-        model = dataHolder.receiverImage.ifEmpty { DEFAULT_PROFILE_MAN_IMAGE },
+        model = dataHolder.receiverDetails.photo.ifEmpty { DEFAULT_PROFILE_MAN_IMAGE },
         contentScale = ContentScale.Crop,
         contentDescription = stringResource(string.cd_home_chat_receiver_profile_image)
       )
@@ -201,7 +219,7 @@ fun MainCard(
           HorizontalSpacer(space = 7)
 
           Text(
-            text = dataHolder.receiverName,
+            text = dataHolder.receiverDetails.name,
             color = black,
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold
@@ -211,8 +229,19 @@ fun MainCard(
 
         VerticalSpacer(space = 3)
 
+        if (FirebaseUtils.currentUser == null) {
+          context.showToast("Got Current User null from firebase")
+          return@Row
+        }
+
         Text(
-          text = dataHolder.secondaryDesc,
+          text = if (dataHolder.lastMessageInChatRoom.senderId == FirebaseUtils.currentUser!!.uid) {
+            //Last message sent by this user. we can show the status of the message
+            dataHolder.lastMessageInChatRoom.status
+          } else {
+            //Last message sent by the receiver. so we can show the latest message itself.
+            dataHolder.lastMessageInChatRoom.message
+          },
           color = black,
           fontSize = 12.sp,
         )
@@ -230,7 +259,16 @@ fun MainCard(
 
         VerticalSpacer(space = 3)
 
-        Text(text = dataHolder.lastMessageSentOrReceivedTime, fontSize = 12.sp, color = black)
+        Text(
+          text = if (dataHolder.lastMessageInChatRoom.senderId == FirebaseUtils.currentUser!!.uid) {
+            //Last message sent by this user. we can show the sent time of message
+            //Todo convert timeStamp into proper date
+            dataHolder.lastMessageInChatRoom.sentTime.toString()
+          } else {
+            //Last message sent by the receiver. we can show the received time of message
+            dataHolder.lastMessageInChatRoom.receivedTime.toString()
+          }, fontSize = 12.sp, color = black
+        )
 
       }
 
@@ -311,15 +349,6 @@ fun RightCard(modifier: Modifier = Modifier) {
     }
   }
 }
-
-data class ReceivedChatDataHolder(
-  val receiverImage: String,
-  val receiverName: String,
-  val isReceiverOnline: Boolean,
-  val isChatStarred: Boolean,
-  val secondaryDesc: String,
-  val lastMessageSentOrReceivedTime: String,
-)
 
 enum class SwipeCardStatus {
   DEFAULT,

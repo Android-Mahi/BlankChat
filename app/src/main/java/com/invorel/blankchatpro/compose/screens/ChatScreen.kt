@@ -1,6 +1,7 @@
 package com.invorel.blankchatpro.compose.screens
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
 import android.view.ViewTreeObserver
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
@@ -30,6 +32,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,7 +50,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.invorel.blankchatpro.constants.DEFAULT_PROFILE_MAN_IMAGE
-import com.invorel.blankchatpro.state.Contact
 import com.invorel.blankchatpro.R.string
 import com.invorel.blankchatpro.compose.common.BlankMoreIcon
 import com.invorel.blankchatpro.compose.common.BlankTextField
@@ -63,6 +65,8 @@ import com.invorel.blankchatpro.viewModels.ChatsViewModel
 import com.invorel.blankchatpro.R.drawable
 import com.invorel.blankchatpro.online.fb_collections.Message
 import com.invorel.blankchatpro.utils.FirebaseUtils
+import com.invorel.blankchatpro.viewModels.ChatReceiverDetails
+import kotlinx.coroutines.launch
 
 @SuppressLint("UnrememberedMutableInteractionSource")
 @Composable
@@ -71,23 +75,37 @@ fun ChatScreen(
   chatRoomId: String = "",
   isCameFromHomeScreen: Boolean,
   viewModel: ChatsViewModel,
-  contact: Contact,
+  localContactPhoto: Bitmap? = null,
+  receiverDetails: ChatReceiverDetails,
   onBackClick: () -> Unit,
 ) {
 
   val context = LocalContext.current
   val state = viewModel.uiState.collectAsState().value
+  val scope = rememberCoroutineScope()
 
   LaunchedEffect(Unit) {
-    viewModel.updateReceiverDetails(contact)
-    //Todo if the isCameFromHomeScreen false & chatRoomId is empty checks if the
+    viewModel.updateReceiverDetails(receiverDetails)
+    if (chatRoomId.isNotEmpty()) {
+      viewModel.updateChatRoomId(chatRoomId)
+      viewModel.getMessagesOfCurrentChatRoomInBackend()
+    }
+    //Todo handle the useCase of user picks the already chat exists contact in Contacts List Screen
     if (isCameFromHomeScreen.not() && chatRoomId.isEmpty()) {
       // User Opened chat from Contacts Picking Screen
       //viewModel.checkReceiverDetailsAndCreateChatRoomInBackendIfNeeded()
     }
-    if (chatRoomId.isNotEmpty()) {
-      viewModel.updateChatRoomId(chatRoomId)
+  }
+
+  LaunchedEffect(state.errorMessage) {
+    if (state.errorMessage.isNotEmpty()) {
+      context.showToast(state.errorMessage)
+      viewModel.clearErrorMessage()
     }
+  }
+
+  LaunchedEffect(Unit) {
+    viewModel.updateSenderDetails()
   }
 
   var isKeyboardVisible by remember { mutableStateOf(false) }
@@ -102,7 +120,9 @@ fun ChatScreen(
   ) {
 
     ChatScreenContactInfo(
-      contact = contact,
+      localContactPhoto  =localContactPhoto,
+      isFromHomeScreen = isCameFromHomeScreen,
+      receiverDetails = receiverDetails,
       onContactsSettingsClicked = {
         context.showToast("Settings Clicked")
       },
@@ -111,13 +131,16 @@ fun ChatScreen(
 
     VerticalSpacer(space = 20)
 
+    val chatListState = rememberLazyListState()
+
     LazyColumn(
+      state = chatListState,
       modifier = Modifier
         .padding(horizontal = 25.dp)
         .weight(1f)
     ) {
-      itemsIndexed(state.chats) { _, chat ->
-        ChatItem(details = chat)
+      itemsIndexed(state.messagesList) { _, chat ->
+        MessageItem(details = chat)
       }
     }
 
@@ -132,6 +155,10 @@ fun ChatScreen(
         modifier = Modifier.weight(1f),
         value = state.currentMessage.message,
         onValueChanged = {
+          val messageList = state.messagesList
+          scope.launch {
+            if (messageList.isNotEmpty()) chatListState.scrollToItem(messageList.lastIndex)
+          }
           viewModel.updateCurrentMessage(viewModel.uiState.value.currentMessage.copy(message = it))
         },
         onClearClicked = { },
@@ -147,7 +174,7 @@ fun ChatScreen(
         modifier = Modifier
           .size(35.dp)
           .clickable(indication = null, interactionSource = MutableInteractionSource(), onClick = {
-            viewModel.addCurrentMessageToChat()
+            viewModel.updateCurrentMessageInBackEnd()
           }),
         painter = painterResource(id = drawable.sms_send_ic),
         contentDescription = stringResource(
@@ -170,7 +197,9 @@ fun ChatScreen(
 @Composable
 fun ChatScreenContactInfo(
   modifier: Modifier = Modifier,
-  contact: Contact,
+  localContactPhoto: Bitmap?,
+  isFromHomeScreen: Boolean,
+  receiverDetails: ChatReceiverDetails,
   onContactsSettingsClicked: () -> Unit,
   onBackArrowClicked: () -> Unit,
 ) {
@@ -205,7 +234,7 @@ fun ChatScreenContactInfo(
       modifier = modifier
         .size(55.dp)
         .clip(RoundedCornerShape(10.dp)),
-      model = contact.photo ?: DEFAULT_PROFILE_MAN_IMAGE,
+      model = if (isFromHomeScreen) receiverDetails.photo.ifEmpty { DEFAULT_PROFILE_MAN_IMAGE } else localContactPhoto ?: DEFAULT_PROFILE_MAN_IMAGE,
       contentDescription = stringResource(string.cd_chat_profile_photo),
       contentScale = Companion.Crop
     )
@@ -215,14 +244,15 @@ fun ChatScreenContactInfo(
     Column {
 
       Text(
-        text = contact.name,
+        text = receiverDetails.name,
         fontSize = 20.sp,
         color = black,
         textAlign = TextAlign.Center
       )
 
       Text(
-        text = if (contact.isOnline) "ONLINE" else "OFFLINE",
+        //Todo listen db and update actual status here
+        text = if (receiverDetails.isReceiverOnline) "ONLINE" else "OFFLINE",
         fontSize = 15.sp,
         color = black,
         textAlign = TextAlign.Center
@@ -243,7 +273,7 @@ fun ChatScreenContactInfo(
 
 @SuppressLint("UnrememberedMutableInteractionSource")
 @Composable
-fun ChatItem(
+fun MessageItem(
   modifier: Modifier = Modifier,
   details: Message,
 ) {

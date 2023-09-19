@@ -8,6 +8,7 @@ import android.net.Uri
 import android.provider.ContactsContract.CommonDataKinds.Phone
 import android.provider.ContactsContract.Contacts
 import android.provider.ContactsContract.Contacts.Photo
+import com.invorel.blankchatpro.extensions.buildProperPhoneNumber
 import com.invorel.blankchatpro.state.Contact
 import java.io.ByteArrayInputStream
 import java.io.IOException
@@ -65,7 +66,7 @@ object ContentResolverUtils {
     )?.use { phoneCursor ->
       return if (phoneCursor.moveToFirst()) {
         val contactNumberColumnIndex = phoneCursor.getColumnIndex(Phone.NUMBER)
-        phoneCursor.getString(contactNumberColumnIndex)
+        phoneCursor.getString(contactNumberColumnIndex).buildProperPhoneNumber()
       } else {
         return ""
       }

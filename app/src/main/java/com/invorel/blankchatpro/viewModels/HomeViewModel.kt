@@ -25,10 +25,14 @@ class HomeViewModel(dataStore: DataStore<Preferences>) : ViewModel() {
   private val dataStoreManager = DataStoreManager(dataStore)
 
   init {
-    refreshDataFromFb()
+    refreshUserProfileDataFromFb()
   }
 
-  fun refreshDataFromFb() {
+  private fun updateChatList(list: List<HomeChatUIModel>) {
+    _uiState.value = _uiState.value.copy(homeChatList = list)
+  }
+
+  fun refreshUserProfileDataFromFb() {
     val nameAndAbout = FirebaseUtils.currentUser?.displayName.orEmpty()
     if (nameAndAbout.isNotEmpty()) {
       with(nameAndAbout.split(DEFAULT_FB_NAME_ABOUT_SEPARATOR)) {
@@ -48,16 +52,20 @@ class HomeViewModel(dataStore: DataStore<Preferences>) : ViewModel() {
     }
   }
 
-  fun updateUserName(name: String) {
+  private fun updateUserName(name: String) {
     _uiState.value = _uiState.value.copy(userName = name)
   }
 
-  fun updateUserAbout(about: String) {
+  private fun updateUserAbout(about: String) {
     _uiState.value = _uiState.value.copy(userAbout = about)
   }
 
   private fun updateErrorMessage(message: ErrorMessage) {
     _uiState.value = _uiState.value.copy(errorMessage = message)
+  }
+
+  fun resetErrorMessage() {
+    _uiState.value = _uiState.value.copy(errorMessage = null)
   }
 
   private fun showLoading() {
@@ -111,7 +119,40 @@ class HomeViewModel(dataStore: DataStore<Preferences>) : ViewModel() {
     })
   }
 
-  public override fun onCleared() {
-    super.onCleared()
+  fun getLatestChatsFromBackend() {
+    FirebaseUtils.getHomeChatListForTheCurrentUser(scope = viewModelScope, onFailed = {
+      updateErrorMessage(StringErrorMessage(it))
+    }, onHomeChatsFetched = { homeChats ->
+      if (homeChats.isEmpty()) {
+        updateErrorMessage(StringErrorMessage("Home Chats got empty from Firebase"))
+      } else {
+        updateChatList(homeChats)
+      }
+    })
   }
+
 }
+
+data class HomeChatUIModel(
+  val roomId: String,
+  val receiverDetails: ChatReceiverDetails,
+  val lastMessageInChatRoom: LatestHomeChatMessage,
+)
+
+data class ChatReceiverDetails(
+  val userId: String,
+  val fcmToken: String,
+  val number: String,
+  val name: String,
+  val photo: String,
+  val isReceiverOnline: Boolean = false
+)
+
+data class LatestHomeChatMessage(
+  val sentTime: Long,
+  val receivedTime: Long,
+  val senderId: String,
+  val receiverId: String,
+  val message: String,
+  val status: String
+)

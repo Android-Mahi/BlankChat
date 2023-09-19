@@ -11,23 +11,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navArgument
-import com.invorel.blankchatpro.activity.CHATNavArgs.HasPhoto
-import com.invorel.blankchatpro.activity.CHATNavArgs.Id
-import com.invorel.blankchatpro.activity.CHATNavArgs.IsCameFromHomeScreen
-import com.invorel.blankchatpro.activity.CHATNavArgs.Name
-import com.invorel.blankchatpro.activity.CHATNavArgs.Number
+import com.invorel.blankchatpro.activity.Screens.CHAT
+import com.invorel.blankchatpro.activity.Screens.CONTACTS
 import com.invorel.blankchatpro.activity.Screens.HOME
 import com.invorel.blankchatpro.activity.Screens.LOGIN
 import com.invorel.blankchatpro.activity.Screens.PROFILE
 import com.invorel.blankchatpro.activity.Screens.SPLASH
 import com.invorel.blankchatpro.activity.Screens.TERMS
-import com.invorel.blankchatpro.activity.Screens.CONTACTS
-import com.invorel.blankchatpro.activity.Screens.CHAT
 import com.invorel.blankchatpro.app.BlankApp
 import com.invorel.blankchatpro.compose.common.HideStatusBar
 import com.invorel.blankchatpro.compose.screens.ChatScreen
@@ -37,11 +30,27 @@ import com.invorel.blankchatpro.compose.screens.LoginScreen
 import com.invorel.blankchatpro.compose.screens.ProfileUpdateScreen
 import com.invorel.blankchatpro.compose.screens.SplashScreen
 import com.invorel.blankchatpro.compose.screens.TermsConditionsScreen
-import com.invorel.blankchatpro.state.Contact
+import com.invorel.blankchatpro.constants.DEFAULT_USER_NAME
 import com.invorel.blankchatpro.ui.theme.BlankChatProTheme
 import com.invorel.blankchatpro.ui.theme.black
 import com.invorel.blankchatpro.utils.ContentResolverUtils
 import com.invorel.blankchatpro.utils.FirebaseUtils
+import com.invorel.blankchatpro.utils.NavigationUtils
+import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.ChatRoomId
+import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.FBUserId
+import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.FBUserImage
+import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.FCMToken
+import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.HasPhoneContactPhoto
+import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.IsCameFromHomeScreen
+import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.IsReceiverOnline
+import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.Name
+import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.Number
+import com.invorel.blankchatpro.utils.NavigationUtils.CHATNavArgs.PhoneContactId
+import com.invorel.blankchatpro.utils.NavigationUtils.ChatRouteType.ChatFromContactsList
+import com.invorel.blankchatpro.utils.NavigationUtils.ChatRouteType.ChatFromHomeList
+import com.invorel.blankchatpro.utils.NavigationUtils.buildChatScreenNavRoute
+import com.invorel.blankchatpro.utils.NavigationUtils.chatScreenArgsList
+import com.invorel.blankchatpro.viewModels.ChatReceiverDetails
 import com.invorel.blankchatpro.viewModels.ChatsViewModel
 import com.invorel.blankchatpro.viewModels.ContactsViewModel
 import com.invorel.blankchatpro.viewModels.HomeViewModel
@@ -146,20 +155,35 @@ fun RootCompose(
               navController.navigate(PROFILE.route)
             }, onNewChatOptionClick = {
               navController.navigate(CONTACTS.route)
+            }, onChatRoomPicked = { chatRoomDetails ->
+              val route = buildChatScreenNavRoute(
+                type = ChatFromHomeList(
+                  number = chatRoomDetails.receiverDetails.number,
+                  name = chatRoomDetails.receiverDetails.name.ifEmpty { DEFAULT_USER_NAME },
+                  userId = chatRoomDetails.receiverDetails.userId,
+                  fcmToken = chatRoomDetails.receiverDetails.fcmToken,
+                  isOnline = chatRoomDetails.receiverDetails.isReceiverOnline,
+                  roomId = chatRoomDetails.roomId,
+                  userImage = chatRoomDetails.receiverDetails.photo
+                )
+              )
+              navController.navigate(route)
             })
         }
 
         composable(CONTACTS.route) {
           ContactsListScreen(
             viewModel = contactsViewModel,
-            onContactPicked = {
-              val chatNavRoute = "Chat"
-                .plus("/${it.number}")
-                .plus("/${it.name}")
-                .plus("/${it.id}")
-                .plus("/${it.photo != null}")
-                .plus("/${false}")
-              navController.navigate(chatNavRoute) {
+            onContactPicked = { contact ->
+              val route = buildChatScreenNavRoute(
+                ChatFromContactsList(
+                number = contact.number,
+                name = contact.name,
+                contactId = contact.id,
+                isContactHadThumbnailPhoto = contact.photo != null
+              )
+              )
+              navController.navigate(route) {
                 popUpTo(CONTACTS.route) {
                   inclusive = true
                 }
@@ -168,14 +192,8 @@ fun RootCompose(
         }
 
         composable(
-          CHAT.route,
-          arguments = listOf(
-            navArgument(Number.name) { type = NavType.StringType },
-            navArgument(Name.name) { type = NavType.StringType },
-            navArgument(Id.name) { type = NavType.LongType },
-            navArgument(HasPhoto.name) { type = NavType.BoolType },
-            navArgument(HasPhoto.name) { type = NavType.BoolType },
-          ),
+          route = CHAT.route,
+          arguments = chatScreenArgsList,
         ) { backStackEntry ->
 
           if (backStackEntry.arguments == null) return@composable
@@ -184,27 +202,39 @@ fun RootCompose(
             backStackEntry.arguments!!.getString(Number.name).orEmpty()
           if (contactNumber.isEmpty()) return@composable
 
-          val contactId = backStackEntry.arguments!!.getLong(Id.name)
+          var localContactPhoto: Bitmap? = null
+
           val contactName = backStackEntry.arguments!!.getString(Name.name).orEmpty()
           val isCameFromHomeScreen = backStackEntry.arguments!!.getBoolean(IsCameFromHomeScreen.name)
 
-          var photo: Bitmap? = null
-          if (backStackEntry.arguments!!.getBoolean(HasPhoto.name, false)) {
-            photo = ContentResolverUtils.retrieveThumbNailPhoto(
+          val fBUSerId = backStackEntry.arguments!!.getString(FBUserId.name).orEmpty()
+          val contactId = backStackEntry.arguments!!.getLong(PhoneContactId.name)
+
+          if (backStackEntry.arguments!!.getBoolean(HasPhoneContactPhoto.name, false)) {
+            localContactPhoto = ContentResolverUtils.retrieveThumbNailPhoto(
               contactId = contactId,
               contentResolver = LocalContext.current.contentResolver
             )
           }
 
-          //Todo id is unused inside compose remove it later
-          val contact = Contact(
-            id = contactId,
+          val fbProfileImage = backStackEntry.arguments!!.getString(FBUserImage.name).orEmpty()
+          val chatRoomId = backStackEntry.arguments!!.getString(ChatRoomId.name).orEmpty()
+          val fcmToken = backStackEntry.arguments!!.getString(FCMToken.name).orEmpty()
+          val isReceiverOnline = backStackEntry.arguments!!.getBoolean(IsReceiverOnline.name, false)
+
+          val receiverDetails = ChatReceiverDetails(
             name = contactName,
             number = contactNumber,
-            photo = photo
+            userId = fBUSerId,
+            fcmToken = fcmToken,
+            photo = fbProfileImage,
+            isReceiverOnline = isReceiverOnline
           )
 
-          ChatScreen(contact = contact,
+          ChatScreen(
+            localContactPhoto = localContactPhoto,
+            receiverDetails = receiverDetails,
+            chatRoomId = chatRoomId,
             viewModel = chatsViewModel,
             onBackClick = {
             navController.popBackStack()
@@ -225,13 +255,5 @@ enum class Screens(val route: String) {
   PROFILE("Profile"),
   HOME("Home"),
   CONTACTS("Contacts"),
-  CHAT("Chat/{$Number}/{$Name}/{$Id}/{$HasPhoto}/{$IsCameFromHomeScreen}"),
-}
-
-enum class CHATNavArgs {
-  Number,
-  Name,
-  Id,
-  HasPhoto,
-  IsCameFromHomeScreen
+  CHAT(NavigationUtils.ChatScreenRoute),
 }

@@ -30,3 +30,8 @@ package com.invorel.blankchatpro
 
 //Introduce ReceiverDetails UID , Number Details locally
 
+//move all model used in clas in one package
+
+//If the contact is empty loader was not hiding
+
+// refactor FirebaseUtils class using co-routine

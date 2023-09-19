@@ -13,5 +13,4 @@ data class Contact(
   val name: String,
   val number: String,
   val photo: Bitmap?,
-  val isOnline: Boolean = false,
 )

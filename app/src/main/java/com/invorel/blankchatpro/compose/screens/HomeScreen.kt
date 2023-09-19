@@ -46,13 +46,14 @@ import androidx.compose.ui.unit.sp
 import com.invorel.blankchatpro.R.drawable
 import com.invorel.blankchatpro.R.string
 import com.invorel.blankchatpro.compose.common.BlankProfileCard
-import com.invorel.blankchatpro.compose.common.BlankSwipeableCard
+import com.invorel.blankchatpro.compose.common.BlankSwipeAbleCard
 import com.invorel.blankchatpro.compose.common.HorizontalSpacer
-import com.invorel.blankchatpro.compose.common.ReceivedChatDataHolder
 import com.invorel.blankchatpro.compose.common.VerticalSpacer
 import com.invorel.blankchatpro.constants.DEFAULT_PROFILE_MAN_IMAGE
 import com.invorel.blankchatpro.extensions.isPermissionGranted
 import com.invorel.blankchatpro.extensions.showToast
+import com.invorel.blankchatpro.others.ErrorMessage.StringErrorMessage
+import com.invorel.blankchatpro.others.ErrorMessage.StringResErrorMessage
 import com.invorel.blankchatpro.ui.theme.black
 import com.invorel.blankchatpro.ui.theme.btn_end_color
 import com.invorel.blankchatpro.ui.theme.btn_start_color
@@ -60,6 +61,7 @@ import com.invorel.blankchatpro.ui.theme.grey
 import com.invorel.blankchatpro.ui.theme.lightGrey
 import com.invorel.blankchatpro.ui.theme.white
 import com.invorel.blankchatpro.utils.IntentUtils
+import com.invorel.blankchatpro.viewModels.ChatReceiverDetails
 import com.invorel.blankchatpro.viewModels.HomeViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -70,7 +72,8 @@ fun HomeScreen(
   modifier: Modifier = Modifier,
   viewModel: HomeViewModel,
   onMoreClickedInProfile: () -> Unit,
-  onNewChatOptionClick: () -> Unit
+  onNewChatOptionClick: () -> Unit,
+  onChatRoomPicked: (ChatRoomDataHolder) -> Unit
 ) {
 
   val context = LocalContext.current
@@ -92,8 +95,25 @@ fun HomeScreen(
     })
 
   LaunchedEffect(Unit) {
-    viewModel.refreshDataFromFb()
+    viewModel.refreshUserProfileDataFromFb()
     viewModel.updateUserStatusOnlineInBackend()
+    //Todo call this method based on localTimeStamp later
+    //Todo listen for each chatRooms updates separately from backend
+    viewModel.getLatestChatsFromBackend()
+  }
+
+  LaunchedEffect(state.errorMessage) {
+    if (state.errorMessage != null) {
+      val message = when(state.errorMessage) {
+        is StringErrorMessage -> state.errorMessage.message
+        is StringResErrorMessage -> context.getString(state.errorMessage.stringRes)
+      }
+
+      if (message.isNotEmpty()) {
+        context.showToast(message)
+        viewModel.resetErrorMessage()
+      }
+    }
   }
 
   Column(modifier = modifier) {
@@ -176,45 +196,19 @@ fun HomeScreen(
           .clickable(indication = null, interactionSource = MutableInteractionSource(), onClick = {
             if (state.isContactPermissionCardVisible) viewModel.showContactPermissionCard(false)
           })
-      )
-      {
+      ) {
 
-        val testData1 = ReceivedChatDataHolder(
-          receiverName = "SRINIVASAN",
-          receiverImage = DEFAULT_PROFILE_MAN_IMAGE,
-          isReceiverOnline = true,
-          isChatStarred = true,
-          secondaryDesc = "3 new Messages",
-          lastMessageSentOrReceivedTime = "5:45 AM"
-        )
-
-        val testData2 = ReceivedChatDataHolder(
-          receiverName = "MAHI",
-          receiverImage = DEFAULT_PROFILE_MAN_IMAGE,
-          isReceiverOnline = false,
-          isChatStarred = true,
-          secondaryDesc = "Sent",
-          lastMessageSentOrReceivedTime = "5:00 AM"
-        )
-
-        val testData3 = ReceivedChatDataHolder(
-          receiverName = "SUJAN",
-          receiverImage = DEFAULT_PROFILE_MAN_IMAGE,
-          isReceiverOnline = true,
-          isChatStarred = false,
-          secondaryDesc = "Seen",
-          lastMessageSentOrReceivedTime = "5:05 AM"
-        )
-
-        val testHomeChatList = listOf(testData1, testData2, testData3)
-
-        if (true) {
+        if (state.homeChatList.isNotEmpty()) {
           LazyColumn {
-            itemsIndexed(testHomeChatList) { _, item ->
-              BlankSwipeableCard(dataHolder = item, onPrivateChatSwiped = {
+            itemsIndexed(state.homeChatList) { _, item ->
+              BlankSwipeAbleCard(
+                homeChatUIModel = item,
+                onPrivateChatSwiped = {
                 context.showToast("OnPrivate Chat Swiped")
               }, onArchiveChatSwiped = {
                 context.showToast("OnArchive Chat Swiped")
+              }, onChatClicked = { chatRoomDetails ->
+                onChatRoomPicked.invoke(chatRoomDetails, )
               })
             }
           }
@@ -223,9 +217,6 @@ fun HomeScreen(
           NoChatAvailable(modifier = Modifier.align(Alignment.Center))
         }
 
-
-
-
         NewChatPencilIcon(modifier = Modifier.align(Alignment.BottomEnd)) {
           if (context.isPermissionGranted(Manifest.permission.READ_CONTACTS)) {
             onNewChatOptionClick.invoke()
@@ -233,8 +224,6 @@ fun HomeScreen(
             viewModel.showContactPermissionCard(true)
           }
         }
-
-
 
         if (state.isContactPermissionCardVisible && !context.isPermissionGranted(Manifest.permission.READ_CONTACTS)) {
           ContactPermissionCard(onAllowClicked = {
@@ -353,3 +342,8 @@ fun ContactPermissionCard(onAllowClicked: () -> Unit) {
 
   }
 }
+
+data class ChatRoomDataHolder(
+  val roomId: String,
+  val receiverDetails: ChatReceiverDetails,
+)

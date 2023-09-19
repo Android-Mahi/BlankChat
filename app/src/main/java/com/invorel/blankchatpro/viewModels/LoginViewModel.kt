@@ -10,7 +10,6 @@ import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.PhoneAuthCredential
 import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.auth.PhoneAuthProvider.ForceResendingToken
-import com.google.gson.JsonArray
 import com.invorel.blankchatpro.constants.DEFAULT_OTP_RESEND_TIME_SECONDS
 import com.invorel.blankchatpro.constants.DataStoreManager
 import com.invorel.blankchatpro.online.fb_collections.User
@@ -159,7 +158,10 @@ class LoginViewModel(private val dataStore: DataStore<Preferences>) : ViewModel(
           return@signInWithPhoneAuthCredentials
         }
 
-        saveUserDetailsInBackend(fbUser)
+        saveUserDetailsInBackend(
+          fbUser = fbUser,
+          onUserDetailsUpdatedInBacked = { updateSignInSuccess() }
+        )
 
         hideLoading()
       }, onSignInFailed = {
@@ -169,7 +171,7 @@ class LoginViewModel(private val dataStore: DataStore<Preferences>) : ViewModel(
     )
   }
 
-  private fun saveUserDetailsInBackend(fbUser: FirebaseUser) {
+  private fun saveUserDetailsInBackend(fbUser: FirebaseUser, onUserDetailsUpdatedInBacked: () -> Unit) {
     viewModelScope.launch(Dispatchers.IO) {
       val manager = DataStoreManager(dataStore)
       manager.fcmTokenKey.collectLatest { token ->
@@ -186,25 +188,21 @@ class LoginViewModel(private val dataStore: DataStore<Preferences>) : ViewModel(
             val userDocument = User(
               userId = fbUser.uid,
               mobileNumber = fbUser.phoneNumber ?: uiState.value.phoneNo,
-              fCMToken = token,
-              chatRoomIds = JsonArray(),
+              fcmToken = token,
+              chatRoomIds = listOf(),
             )
             if (isUserExists) {
               FirebaseUtils.updateUserDetailsInFirebase(
-                userDocument.mobileNumber,
-                fbUser.uid,
-                token,
-                onUserDetailsUpdated = {
-                  updateSignInSuccess()
-                },
+                mobileNumber = userDocument.mobileNumber,
+                userId = fbUser.uid,
+                fcmToken = token,
+                onUserDetailsUpdated = { onUserDetailsUpdatedInBacked.invoke() },
                 onFailed = ::updateErrorMessage,
               )
             } else {
               FirebaseUtils.saveUserDetailsInFirebase(
                 user = userDocument,
-                onUserDetailsSaved = {
-                  //Show Success Message If needed
-                },
+                onUserDetailsSaved = { onUserDetailsUpdatedInBacked.invoke() },
                 onUserDetailsFailedToSave = ::updateErrorMessage
               )
             }
