@@ -82,6 +82,7 @@ fun ChatScreen(
   val context = LocalContext.current
   val state = viewModel.uiState.collectAsState().value
   val chatListState = rememberLazyListState()
+  var isKeyboardVisible by remember { mutableStateOf(false) }
 
   LaunchedEffect(Unit) {
     viewModel.updateReceiverDetails(receiverDetails, localContactPhoto)
@@ -96,10 +97,19 @@ fun ChatScreen(
     }
   }
 
-  //Navigates to the last message in chat
-  LaunchedEffect(state.messagesList) {
+  //Navigates to the last message in chat when we enter this screen for the first time
+  LaunchedEffect(key1 = state.messagesList, key2 = isKeyboardVisible) {
     if (state.messagesList.isNotEmpty()){
       chatListState.scrollToItem(state.messagesList.lastIndex)
+    }
+  }
+
+  //Navigates to the last message in chat whenever the keyboard in popped up
+  LaunchedEffect(key1 = isKeyboardVisible) {
+    if (isKeyboardVisible) {
+      if (state.messagesList.isNotEmpty()){
+        chatListState.scrollToItem(state.messagesList.lastIndex)
+      }
     }
   }
 
@@ -114,7 +124,7 @@ fun ChatScreen(
     viewModel.updateSenderDetails()
   }
 
-  var isKeyboardVisible by remember { mutableStateOf(false) }
+
 
   KeyboardVisibilityObserver {
     isKeyboardVisible = it
