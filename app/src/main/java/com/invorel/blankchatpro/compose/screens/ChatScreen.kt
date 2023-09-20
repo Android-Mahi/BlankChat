@@ -2,6 +2,7 @@ package com.invorel.blankchatpro.compose.screens
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.view.ViewTreeObserver
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -28,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,7 +41,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale.Companion
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -67,7 +68,7 @@ import com.invorel.blankchatpro.utils.FirebaseUtils
 import com.invorel.blankchatpro.viewModels.ChatReceiverDetails
 import com.invorel.blankchatpro.viewModels.ChatsViewModel
 
-@SuppressLint("UnrememberedMutableInteractionSource")
+@SuppressLint("UnrememberedMutableInteractionSource", "CoroutineCreationDuringComposition")
 @Composable
 fun ChatScreen(
   modifier: Modifier = Modifier,
@@ -82,7 +83,7 @@ fun ChatScreen(
   val context = LocalContext.current
   val state = viewModel.uiState.collectAsState().value
   val chatListState = rememberLazyListState()
-  var isKeyboardVisible by remember { mutableStateOf(false) }
+  val keyboardState by keyboardAsState()
 
   LaunchedEffect(Unit) {
     viewModel.updateReceiverDetails(receiverDetails, localContactPhoto)
@@ -98,15 +99,14 @@ fun ChatScreen(
   }
 
   //Navigates to the last message in chat when we enter this screen for the first time
-  LaunchedEffect(key1 = state.messagesList, key2 = isKeyboardVisible) {
+  LaunchedEffect(key1 = state.messagesList) {
     if (state.messagesList.isNotEmpty()){
       chatListState.scrollToItem(state.messagesList.lastIndex)
     }
   }
 
-  //Navigates to the last message in chat whenever the keyboard in popped up
-  LaunchedEffect(key1 = isKeyboardVisible) {
-    if (isKeyboardVisible) {
+  LaunchedEffect(keyboardState) {
+    if (keyboardState == Keyboard.Opened) {
       if (state.messagesList.isNotEmpty()){
         chatListState.scrollToItem(state.messagesList.lastIndex)
       }
@@ -122,12 +122,6 @@ fun ChatScreen(
 
   LaunchedEffect(Unit) {
     viewModel.updateSenderDetails()
-  }
-
-
-
-  KeyboardVisibilityObserver {
-    isKeyboardVisible = it
   }
 
   Column(
@@ -201,7 +195,7 @@ fun ChatScreen(
 
     VerticalSpacer(space = 15)
 
-    if (isKeyboardVisible) {
+    if (keyboardState == Keyboard.Opened) {
       Spacer(modifier = Modifier.padding(bottom = 10.dp))
     }
   }
@@ -381,29 +375,32 @@ fun MessageItem(
 }
 
 @Composable
-fun KeyboardVisibilityObserver(
-  onKeyboardVisibilityChanged: (Boolean) -> Unit,
-) {
-  val rootView = LocalView.current
-  val context = LocalContext.current
-  val density = LocalDensity.current.density
-
-  DisposableEffect(context) {
-    val listener = ViewTreeObserver.OnGlobalLayoutListener {
-      val rect = android.graphics.Rect()
-      rootView.getWindowVisibleDisplayFrame(rect)
-      val screenHeight = rootView.height
+fun keyboardAsState(): State<Keyboard> {
+  val keyboardState = remember { mutableStateOf(Keyboard.Closed) }
+  val view = LocalView.current
+  DisposableEffect(view) {
+    val onGlobalListener = ViewTreeObserver.OnGlobalLayoutListener {
+      val rect = Rect()
+      view.getWindowVisibleDisplayFrame(rect)
+      val screenHeight = view.rootView.height
       val keypadHeight = screenHeight - rect.bottom
-
-      // If the keypad height is greater than a threshold (e.g., 100dp), keyboard is open
-      val isKeyboardVisible = keypadHeight > 100 * density
-      onKeyboardVisibilityChanged(isKeyboardVisible)
+      keyboardState.value = if (keypadHeight > screenHeight * 0.15) {
+        Keyboard.Opened
+      } else {
+        Keyboard.Closed
+      }
     }
-
-    rootView.viewTreeObserver.addOnGlobalLayoutListener(listener)
+    view.viewTreeObserver.addOnGlobalLayoutListener(onGlobalListener)
 
     onDispose {
-      rootView.viewTreeObserver.removeOnGlobalLayoutListener(listener)
+      view.viewTreeObserver.removeOnGlobalLayoutListener(onGlobalListener)
     }
   }
+
+  return keyboardState
 }
+
+enum class Keyboard {
+  Opened, Closed
+}
+
