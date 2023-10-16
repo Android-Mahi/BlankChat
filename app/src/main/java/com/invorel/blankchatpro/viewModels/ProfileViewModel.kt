@@ -9,6 +9,8 @@ import com.invorel.blankchatpro.R.string
 import com.invorel.blankchatpro.constants.DEFAULT_FB_NAME_ABOUT_SEPARATOR
 import com.invorel.blankchatpro.constants.DataStoreManager
 import com.invorel.blankchatpro.extensions.isNotNullAndNotEmpty
+import com.invorel.blankchatpro.local.repo.LocalRepo
+import com.invorel.blankchatpro.local.tables.LocalUser
 import com.invorel.blankchatpro.others.ErrorMessage
 import com.invorel.blankchatpro.others.ErrorMessage.StringErrorMessage
 import com.invorel.blankchatpro.others.ErrorMessage.StringResErrorMessage
@@ -20,7 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-class ProfileViewModel(dataStore: DataStore<Preferences>) : ViewModel() {
+class ProfileViewModel(dataStore: DataStore<Preferences>, val localRepo: LocalRepo) : ViewModel() {
 
   private val _uiState = MutableStateFlow(ProfileUiState())
   val uiState = _uiState.asStateFlow()
@@ -153,7 +155,28 @@ class ProfileViewModel(dataStore: DataStore<Preferences>) : ViewModel() {
       profilePhoto = uiState.value.fireBaseProfileImgUrl,
       onFailed = { updateErrorMessage(StringErrorMessage(it)) },
       onUserDetailsUpdated = {
-        updateErrorMessage(StringResErrorMessage(string.profile_updated))
+
+        if (FirebaseUtils.currentUser == null) {
+          updateErrorMessage(StringErrorMessage("Got Current user null while updating profile details"))
+          return@updateUserDetailsInFirebase
+        }
+
+        val localUser = LocalUser(
+          userId = FirebaseUtils.currentUser!!.uid,
+          lastRoomCreatedAt = -1,
+          number = uiState.value.userNumber
+        )
+
+        localRepo.saveUserDetails(
+          scope = viewModelScope,
+          user = localUser,
+          onFailed = {
+            updateErrorMessage(StringErrorMessage(it))
+          },
+          onSuccess = {
+            updateErrorMessage(StringResErrorMessage(string.profile_updated))
+          })
+
       },
       //Todo update below field value properly after the Gender Option is implemented
       gender = 0,

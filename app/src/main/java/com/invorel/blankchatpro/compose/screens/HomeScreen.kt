@@ -95,11 +95,15 @@ fun HomeScreen(
     })
 
   LaunchedEffect(Unit) {
-    viewModel.refreshUserProfileDataFromFb()
-    viewModel.updateUserStatusOnlineInBackend()
-    //Todo call this method based on localTimeStamp later
-    //Todo listen for each chatRooms updates separately from backend
-    viewModel.getLatestChatsFromBackend()
+    with(viewModel) {
+      checkLatestChatsFromBackendAndUpdateIfNeeded()
+      refreshUserProfileDataFromFb()
+      updateUserStatusOnlineInBackend()
+      //Todo call this method based on localTimeStamp later
+      //Todo listen for each chatRooms updates separately from backend
+      getLocalHomeChats()
+      //listenLatestHomeChatsUpdateIfNeeded()
+    }
   }
 
   LaunchedEffect(state.errorMessage) {
@@ -204,12 +208,13 @@ fun HomeScreen(
               BlankSwipeAbleCard(
                 homeChatUIModel = item,
                 onPrivateChatSwiped = {
-                context.showToast("OnPrivate Chat Swiped")
-              }, onArchiveChatSwiped = {
-                context.showToast("OnArchive Chat Swiped")
-              }, onChatClicked = { chatRoomDetails ->
-                onChatRoomPicked.invoke(chatRoomDetails, )
-              })
+                  context.showToast("OnPrivate Chat Swiped")
+                }, onArchiveChatSwiped = {
+                  context.showToast("OnArchive Chat Swiped")
+                }, onChatClicked = { chatRoomDetails ->
+                  viewModel.cancelFirebaseHomeChatListener()
+                  onChatRoomPicked.invoke(chatRoomDetails)
+                })
             }
           }
 

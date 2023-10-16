@@ -237,7 +237,8 @@ fun MainCard(
         Text(
           text = if (dataHolder.lastMessageInChatRoom.senderId == FirebaseUtils.currentUser!!.uid) {
             //Last message sent by this user. we can show the status of the message
-            dataHolder.lastMessageInChatRoom.status
+            //todo use getStatusMessage() func here
+            dataHolder.lastMessageInChatRoom.status.toString()
           } else {
             //Last message sent by the receiver. so we can show the latest message itself.
             dataHolder.lastMessageInChatRoom.message

@@ -20,15 +20,20 @@ import com.google.firebase.storage.StorageReference
 import com.invorel.blankchatpro.constants.DEFAULT_CHATROOM_COLLECTION_NAME
 import com.invorel.blankchatpro.constants.DEFAULT_CHAT_ROOM_SEPARATOR
 import com.invorel.blankchatpro.constants.DEFAULT_COUNTRY_CODE
-import com.invorel.blankchatpro.constants.DEFAULT_OTP_RESEND_TIME_SECONDS
 import com.invorel.blankchatpro.constants.DEFAULT_DIRECTORY_NAME_FOR_PROFILE_IN_FIREBASE
+import com.invorel.blankchatpro.constants.DEFAULT_OTP_RESEND_TIME_SECONDS
 import com.invorel.blankchatpro.constants.DEFAULT_STATUS_COLLECTION_NAME
 import com.invorel.blankchatpro.constants.DEFAULT_USERS_COLLECTION_NAME
 import com.invorel.blankchatpro.constants.DEFAULT_USER_NAME
 import com.invorel.blankchatpro.constants.DEFAULT__MESSAGE_COLLECTION_NAME
+import com.invorel.blankchatpro.extensions.isNumberTypeChatRoom
 import com.invorel.blankchatpro.online.fb_collections.Message
 import com.invorel.blankchatpro.online.fb_collections.Status
 import com.invorel.blankchatpro.online.fb_collections.User
+import com.invorel.blankchatpro.utils.FirebaseUtils.FireStoreResult.Success
+import com.invorel.blankchatpro.utils.FirebaseUtils.ReceiverExistStatus.RECEIVER_EXISTS_WITHOUT_LOGIN
+import com.invorel.blankchatpro.utils.FirebaseUtils.ReceiverExistStatus.RECEIVER_EXISTS_WITH_LOGIN
+import com.invorel.blankchatpro.utils.FirebaseUtils.ReceiverExistStatus.RECEIVER_NOT_EXISTS
 import com.invorel.blankchatpro.viewModels.ChatReceiverDetails
 import com.invorel.blankchatpro.viewModels.HomeChatUIModel
 import com.invorel.blankchatpro.viewModels.LatestHomeChatMessage
@@ -40,6 +45,12 @@ import kotlinx.coroutines.tasks.await
 import java.util.concurrent.TimeUnit.SECONDS
 
 object FirebaseUtils {
+
+  sealed class ReceiverExistStatus {
+    object RECEIVER_NOT_EXISTS : ReceiverExistStatus()
+    object RECEIVER_EXISTS_WITHOUT_LOGIN : ReceiverExistStatus()
+    data class RECEIVER_EXISTS_WITH_LOGIN(val userId: String) : ReceiverExistStatus()
+  }
 
   sealed class FireStoreResult<out T> {
     data class Success<out T>(val data: T) : FireStoreResult<T>()
@@ -345,7 +356,8 @@ object FirebaseUtils {
           User.nameKey to name,
           User.aboutKey to about,
           User.profilePhotoKey to profilePhoto,
-          User.genderKey to gender
+          User.genderKey to gender,
+          User.lastProfileUpdatedAt to System.currentTimeMillis()
         )
       )
       .addOnSuccessListener { onUserDetailsUpdated.invoke() }
@@ -388,139 +400,128 @@ object FirebaseUtils {
       }
   }
 
-  fun getHomeChatListForTheCurrentUser(
+  suspend fun getHomeChatListForChatRoomIds(
     scope: CoroutineScope,
-    onFailed: (String) -> Unit,
-    onHomeChatsFetched: (List<HomeChatUIModel>) -> Unit,
-  ) {
+    chatRoomIds: List<String>,
+  ): FireStoreResult<List<HomeChatUIModel>> {
 
-    if (currentUser == null) {
-      onFailed.invoke("Current FB User is Null")
-      return
+    if (chatRoomIds.isEmpty()) {
+      return FireStoreResult.Error("ChatRoomIds got as empty while getting Home ChatList")
     }
 
-    if (currentUser!!.phoneNumber == null) {
-      onFailed.invoke("Current FB User is Null")
-      return
-    }
+    val homeChatList = chatRoomIds.map { roomId ->
 
-    FirebaseFirestore.getInstance()
-      .collection(DEFAULT_USERS_COLLECTION_NAME)
-      .document(currentUser!!.phoneNumber!!)
-      .get()
-      .addOnFailureListener {
-        onFailed.invoke(
-          it.message ?: "Failed to get current user data to get chatRoomIds"
-        )
-      }
-      .addOnSuccessListener {
-        val user = it.toObject(User::class.java)
+      scope.async {
 
-        if (user == null) {
-          onFailed.invoke("User data parsed as null from FB while retrieving chatRoomIds")
-          return@addOnSuccessListener
+        val latestMessageInChat = getLatestMessageOfTheChatRoom(chatRoomId = roomId)
+
+        if (latestMessageInChat is FireStoreResult.Error) {
+          FireStoreResult.Error(latestMessageInChat.errorMessage)
+          return@async null
         }
 
-        val chatRoomIds = user.chatRoomIds
+        val getRoomCreatedAtResult = getRoomCreatedAtValueOfTheChatRoom(roomId)
 
-        if (chatRoomIds.isEmpty()) {
-          onFailed.invoke("Welcome to BlankChat")
-          return@addOnSuccessListener
+        if (getRoomCreatedAtResult is FireStoreResult.Error) {
+          FireStoreResult.Error(getRoomCreatedAtResult.errorMessage)
+          return@async null
         }
 
-        val deferredChatList = chatRoomIds.map { roomId ->
+        val receiverNumberOfChat = getReceiverNumberOfChatRoom(chatRoomId = roomId)
 
-          scope.async {
-
-            val latestMessageInChat = getLatestMessageOfTheChatRoom(chatRoomId = roomId)
-
-            if (latestMessageInChat is FireStoreResult.Error) {
-              onFailed.invoke(latestMessageInChat.errorMessage)
-            }
-
-            val receiverNumberOfChat = getReceiverNumberOfChatRoom(chatRoomId = roomId)
-
-            if (receiverNumberOfChat is FireStoreResult.Error) {
-              onFailed.invoke(receiverNumberOfChat.errorMessage)
-            }
-
-            val receiverDetails =
-              getReceiverDetailsOfChat((receiverNumberOfChat as FireStoreResult.Success).data)
-
-            if ((receiverDetails as FireStoreResult.Success).data.userId.isEmpty()) {
-              //Receiver Not Logged In we can set the status to offline
-              HomeChatUIModel(
-                roomId = roomId,
-                receiverDetails = receiverDetails.data.copy(isReceiverOnline = false),
-                lastMessageInChatRoom = (latestMessageInChat as FireStoreResult.Success).data
-              )
-            } else {
-              val isReceiverOnline = getReceiverOnlineStatus(userId = receiverDetails.data.userId)
-
-              HomeChatUIModel(
-                roomId = roomId,
-                receiverDetails = receiverDetails.data.copy(isReceiverOnline = (isReceiverOnline as FireStoreResult.Success).data),
-                lastMessageInChatRoom = (latestMessageInChat as FireStoreResult.Success).data
-              )
-            }
-          }
+        if (receiverNumberOfChat is FireStoreResult.Error) {
+          FireStoreResult.Error(receiverNumberOfChat.errorMessage)
+          return@async null
         }
 
-        scope.launch {
-          onHomeChatsFetched.invoke(deferredChatList.awaitAll())
+        val receiverDetails =
+          getReceiverDetailsOfChat((receiverNumberOfChat as Success).data)
+
+        if ((receiverDetails as Success).data.userId.isEmpty()) {
+          //Receiver Not Logged In we can set the status to offline
+          HomeChatUIModel(
+            roomId = roomId,
+            receiverDetails = receiverDetails.data.copy(isReceiverOnline = false),
+            lastMessageInChatRoom = (latestMessageInChat as Success).data,
+            roomCreatedAt = (getRoomCreatedAtResult as Success).data
+          )
+        } else {
+          val isReceiverOnline = getReceiverOnlineStatus(userId = receiverDetails.data.userId)
+
+          HomeChatUIModel(
+            roomId = roomId,
+            receiverDetails = receiverDetails.data.copy(isReceiverOnline = (isReceiverOnline as Success).data),
+            lastMessageInChatRoom = (latestMessageInChat as Success).data,
+            roomCreatedAt = (getRoomCreatedAtResult as Success).data
+          )
         }
       }
+    }.awaitAll().filterNotNull()
+
+    return Success(homeChatList)
   }
 
-   private suspend fun getLatestMessageOfTheChatRoom(
+  private suspend fun getLatestMessageOfTheChatRoom(
     chatRoomId: String,
   ): FireStoreResult<LatestHomeChatMessage> {
 
-     fun getStatusMessage(status: Int): String {
-       return when (status) {
-         0 -> "Processing"
-         1 -> "Sent"
-         2 -> "Received"
-         3 -> "Seen"
-         else -> "Processing"
-       }
-     }
+    return try {
+      val messagesSnap = FirebaseFirestore.getInstance()
+        .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+        .document(chatRoomId)
+        .get().await()
 
-     return try {
-       val messagesSnap = FirebaseFirestore.getInstance()
-         .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
-         .document(chatRoomId)
-         .get().await()
+      val latestMessage = messagesSnap.data as HashMap<String, HashMap<String, Any>>
+      val latestMessageValueMap = latestMessage[Message.latestMessageKey]
 
-       val latestMessage = messagesSnap.data as HashMap<String, HashMap<String, Any>>
-       val latestMessageValueMap = latestMessage[Message.latestMessageKey]
+      val message = Message(
+        id = (latestMessageValueMap?.get(Message.idKey) as Long).toInt(),
+        message = latestMessageValueMap[Message.messageKey] as String,
+        senderId = latestMessageValueMap[Message.senderIdKey] as String,
+        receiverId = latestMessageValueMap[Message.receiverIdKey] as String,
+        isSentByMessageMode = latestMessageValueMap[Message.isSentByMessageModeKey] as Boolean,
+        status = (latestMessageValueMap[Message.statusKey] as Long).toInt(),
+        sentTime = latestMessageValueMap[Message.sentTimeKey] as Long,
+        receivedTime = latestMessageValueMap[Message.receivedTimeKey] as Long,
+      )
 
-       val message = Message(
-         id = (latestMessageValueMap?.get(Message.idKey) as Long).toInt(),
-         message = latestMessageValueMap[Message.messageKey] as String,
-         senderId = latestMessageValueMap[Message.senderIdKey] as String,
-         receiverId = latestMessageValueMap[Message.receiverIdKey] as String,
-         isMessageModeOn = latestMessageValueMap[Message.isMessageModeOnKey] as Boolean,
-         status = (latestMessageValueMap[Message.statusKey] as Long).toInt(),
-         sentTime = latestMessageValueMap[Message.sentTimeKey] as Long,
-         receivedTime = latestMessageValueMap[Message.receivedTimeKey] as Long,
-       )
+      //val message = messagesSnap.toObject(Message::class.java) ?: return FireStoreResult.Error("Data parsed as null while getting latest Message of the chat Room")
 
-       //val message = messagesSnap.toObject(Message::class.java) ?: return FireStoreResult.Error("Data parsed as null while getting latest Message of the chat Room")
+      val latestHomeChatMessage = LatestHomeChatMessage(
+        senderId = message.senderId,
+        receiverId = message.receiverId,
+        message = message.message,
+        status = message.status,
+        receivedTime = message.receivedTime,
+        sentTime = message.sentTime,
+        isSentInMessageMode = message.isSentByMessageMode,
+        messageId = message.id
+      )
+      Success(latestHomeChatMessage)
+    } catch (e: Exception) {
+      FireStoreResult.Error(e.message ?: "Failed to get Latest Message of the Chat Room")
+    }
+  }
 
-       val latestHomeChatMessage = LatestHomeChatMessage(
-         senderId = message.senderId,
-         receiverId = message.receiverId,
-         message = message.message,
-         status = getStatusMessage(message.status),
-         receivedTime = message.receivedTime,
-         sentTime = message.receivedTime
-       )
-       FireStoreResult.Success(latestHomeChatMessage)
-     } catch (e: Exception) {
-       FireStoreResult.Error(e.message ?: "Failed to get Latest Message of the Chat Room")
-     }
+  private suspend fun getRoomCreatedAtValueOfTheChatRoom(
+    chatRoomId: String,
+  ): FireStoreResult<Long> {
+    return try {
+      val chatRoomSnap = FirebaseFirestore.getInstance()
+        .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+        .document(chatRoomId)
+        .get().await()
 
+      val roomCreatedAt = chatRoomSnap.get(Message.roomCreatedAtKey) as Long
+
+      if (roomCreatedAt == -1L) {
+        FireStoreResult.Error("Got roomCreatedAt value as -1")
+      } else {
+        Success(roomCreatedAt)
+      }
+    } catch (e: Exception) {
+      FireStoreResult.Error(e.message ?: "Failed to get Latest Message of the Chat Room")
+    }
   }
 
   private suspend fun getReceiverNumberOfChatRoom(
@@ -563,12 +564,10 @@ object FirebaseUtils {
         return FireStoreResult.Error("Sender And Receiver Number Same after removing operations in list")
       }
 
-      return FireStoreResult.Success(receiverNumber)
-
+      return Success(receiverNumber)
     } catch (e: Exception) {
       FireStoreResult.Error(e.message ?: "Failed to get Participants Details of ChatRoomId")
     }
-
   }
 
   private suspend fun getReceiverDetailsOfChat(
@@ -584,13 +583,15 @@ object FirebaseUtils {
       val receiver = snap.toObject(User::class.java)
         ?: return FireStoreResult.Error("User parsed as null while getting receiver details")
 
-      FireStoreResult.Success(ChatReceiverDetails(
-        userId = receiver.userId,
-        fcmToken = receiver.fcmToken,
-        number = receiver.mobileNumber,
-        name = receiver.name.ifEmpty { DEFAULT_USER_NAME },
-        photo = receiver.photo,
-      ))
+      Success(
+        ChatReceiverDetails(
+          userId = receiver.userId,
+          fcmToken = receiver.fcmToken,
+          number = receiver.mobileNumber,
+          name = receiver.name.ifEmpty { DEFAULT_USER_NAME },
+          photo = receiver.photo,
+        )
+      )
     } catch (e: Exception) {
       FireStoreResult.Error(e.message ?: "Failed to get Receiver Details of the chat")
     }
@@ -610,179 +611,355 @@ object FirebaseUtils {
         ?: return FireStoreResult.Error("Data parsed as null while getting receiver details")
 
       val isOnline = data[Status.isOnlineKey] as Boolean
-      FireStoreResult.Success(isOnline)
+      Success(isOnline)
     } catch (e: Exception) {
       FireStoreResult.Error(e.message ?: "Failed to get Receiver Online Status of the user")
     }
   }
 
-  fun listenChatRoomUpdates(
-    roomId: String,
-    onChatUpdated: () -> Unit,
-    onError: (String) -> Unit,
+  suspend fun getLastRoomUpdatedAtValueInUser(phoneNo: String): FireStoreResult<Long> {
+    val userDoc =
+      FirebaseFirestore.getInstance().collection(DEFAULT_USERS_COLLECTION_NAME).document(phoneNo)
+        .get().await()
+
+    val user = userDoc.toObject(User::class.java)
+      ?: return FireStoreResult.Error("Got User Document as null phoneNo: $phoneNo in FB")
+
+    return if (user.lastRoomCreatedAt == -1L) {
+      FireStoreResult.Error("Got lastRoomCreatedAt as -1 in User phoneNo: $phoneNo in FB")
+    } else {
+      Success(user.lastRoomCreatedAt)
+    }
+  }
+
+  suspend fun listenChatRoomUpdates(
+    scope: CoroutineScope,
+    onFailed: (String) -> Unit,
+    onSuccess: (List<HomeChatUIModel>) -> Unit,
   ) {
-    FirebaseFirestore.getInstance().collection(DEFAULT_CHATROOM_COLLECTION_NAME)
-      .document(roomId)
-      .addSnapshotListener { value, error ->
+
+    if (currentUser == null) {
+      onFailed.invoke("Got Current User as null")
+      return
+    }
+
+    val currentUserNo = currentUser!!.phoneNumber.orEmpty()
+
+    if (currentUserNo.isEmpty()) {
+      onFailed.invoke("Got currentUserNo as Empty")
+      return
+    }
+
+    FirebaseFirestore.getInstance()
+      .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+      .addSnapshotListener { updatedValues, error ->
         if (error != null) {
-          onError.invoke(error.message ?: "Unable to List $roomId updates")
+          onFailed.invoke(error.message ?: "Error Got while listening ChatRoom Updates")
+          return@addSnapshotListener
+        }
+
+        if (updatedValues == null) {
+          onFailed.invoke("Got updatedValues as null")
+          return@addSnapshotListener
+        }
+
+        scope.launch {
+
+          val updatedChatsDocIdsForCurrentUser =
+            updatedValues.documents.map { it.id }.filter { roomId ->
+              if(roomId.isNumberTypeChatRoom()) {
+                val roomParticipants = roomId.split(DEFAULT_CHAT_ROOM_SEPARATOR)
+                roomParticipants.contains(currentUserNo)
+              } else {
+                val participantsResult = scope.async { getParticipantsDetailsOfChatRoom(roomId) }.await()
+
+                if (participantsResult is FireStoreResult.Error) {
+                  onFailed.invoke("Got Participants as empty")
+                  false
+                } else {
+                  val roomParticipants = (participantsResult as Success).data.split(DEFAULT_CHAT_ROOM_SEPARATOR)
+                  roomParticipants.contains(currentUserNo)
+                }
+              }
+            }.map { roomId ->
+
+              val latestMessageInChat =
+                scope.async { getLatestMessageOfTheChatRoom(chatRoomId = roomId) }.await()
+
+              if (latestMessageInChat is FireStoreResult.Error) {
+                onFailed.invoke(latestMessageInChat.errorMessage)
+                return@map null
+              }
+
+              val getRoomCreatedAtResult =
+                scope.async { getRoomCreatedAtValueOfTheChatRoom(roomId) }.await()
+
+              if (getRoomCreatedAtResult is FireStoreResult.Error) {
+                onFailed.invoke(getRoomCreatedAtResult.errorMessage)
+                return@map null
+              }
+
+              val receiverNumberOfChat =
+                scope.async { getReceiverNumberOfChatRoom(chatRoomId = roomId) }.await()
+
+              if (receiverNumberOfChat is FireStoreResult.Error) {
+                onFailed.invoke(receiverNumberOfChat.errorMessage)
+                return@map null
+              }
+
+              val receiverDetails =
+                scope.async { getReceiverDetailsOfChat((receiverNumberOfChat as Success).data) }
+                  .await()
+
+              if ((receiverDetails as Success).data.userId.isEmpty()) {
+                //Receiver Not Logged In we can set the status to offline
+                HomeChatUIModel(
+                  roomId = roomId,
+                  receiverDetails = receiverDetails.data.copy(isReceiverOnline = false),
+                  lastMessageInChatRoom = (latestMessageInChat as Success).data,
+                  roomCreatedAt = (getRoomCreatedAtResult as Success).data
+                )
+              } else {
+                val isReceiverOnline =
+                  scope.async { getReceiverOnlineStatus(userId = receiverDetails.data.userId) }
+                    .await()
+
+                HomeChatUIModel(
+                  roomId = roomId,
+                  receiverDetails = receiverDetails.data.copy(isReceiverOnline = (isReceiverOnline as Success).data),
+                  lastMessageInChatRoom = (latestMessageInChat as Success).data,
+                  roomCreatedAt = (getRoomCreatedAtResult as Success).data
+                )
+              }
+
+            }.filterNotNull()
+
+          onSuccess.invoke(updatedChatsDocIdsForCurrentUser)
+
+        }
+
+      }
+  }
+
+  private suspend fun getParticipantsDetailsOfChatRoom(roomId: String): FireStoreResult<String> {
+
+    return try {
+      val getChatRoomDocResult =
+        FirebaseFirestore.getInstance().collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+          .document(roomId)
+          .get().await()
+
+      val chatRoomResult = getChatRoomDocResult.data
+        ?: return FireStoreResult.Error("Got ChatRoomResult as null")
+
+      val participants = chatRoomResult[Message.participantsKey] as? String
+
+      if (participants.isNullOrEmpty()) {
+        return FireStoreResult.Error("Got Participants as empty")
+      }
+
+      Success(participants)
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(e.message ?: "Got exception while getting participants details")
+    }
+  }
+
+  suspend fun getChatRoomIdsForCurrentUser(): FireStoreResult<List<String>> {
+    return try {
+      if (currentUser == null) {
+        FireStoreResult.Error("Got Current User as null")
+      } else if (currentUser!!.phoneNumber.isNullOrEmpty()) {
+        FireStoreResult.Error("Got Current User phone Number as null or Empty")
+      } else {
+        val userDoc = FirebaseFirestore.getInstance().collection(DEFAULT_USERS_COLLECTION_NAME)
+          .document(currentUser!!.phoneNumber!!)
+          .get().await()
+
+        val user = userDoc.toObject(User::class.java)
+
+        if (user == null) {
+          FireStoreResult.Error("User object parsed as null")
         } else {
-          onChatUpdated
+          Success(user.chatRoomIds)
         }
       }
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error("Got exception while Getting ChatRoomIds for user")
+    }
   }
 
   /*---------------------------------------HOME SCREEN METHODS ENDS------------------------------------------------------------------*/
 
   /*---------------------------------------CHAT SCREEN METHODS STARTS------------------------------------------------------------------*/
 
-  fun checkReceiverDetailsInFireBase(
+  suspend fun checkReceiverDetailsInFireBase(
     mobileNumber: String,
-    onFailed: (String) -> Unit,
-    onReceiverExistsWithLogin: (String) -> Unit,
-    onReceiverExistsWithoutLogin: () -> Unit,
-    onReceiverNotExists: () -> Unit,
-  ) {
-    FirebaseFirestore.getInstance().collection(DEFAULT_USERS_COLLECTION_NAME).document(mobileNumber)
-      .get()
-      .addOnFailureListener { onFailed.invoke(it.message ?: "Failed to get Receiver User Details") }
-      .addOnSuccessListener {
-        if (it.exists()) {
-          // Receiver Details Exists in DB
-          val user = it.toObject(User::class.java)
-          if (user == null) onFailed.invoke(" Receiver's user object parsed as null")
+  ): FireStoreResult<ReceiverExistStatus> {
 
-          if (user!!.userId.isNotEmpty()) {
-            //Receiver logged In
-            onReceiverExistsWithLogin.invoke(user.userId)
-          } else {
-            //Receiver Not logged In
-            onReceiverExistsWithoutLogin.invoke()
-          }
+    return try {
+
+      val receiverSnap = FirebaseFirestore.getInstance().collection(DEFAULT_USERS_COLLECTION_NAME)
+        .document(mobileNumber)
+        .get().await()
+
+      if (receiverSnap.exists()) {
+        // Receiver Details Exists in DB
+        val user = receiverSnap.toObject(User::class.java)
+          ?: return FireStoreResult.Error("Receiver's user object parsed as null")
+
+        if (user.userId.isNotEmpty()) {
+          //Receiver logged In
+          Success(RECEIVER_EXISTS_WITH_LOGIN(user.userId))
         } else {
-          // Receiver Details Not Present in DB
-          onReceiverNotExists.invoke()
+          //Receiver Not logged In
+          Success(RECEIVER_EXISTS_WITHOUT_LOGIN)
         }
+      } else {
+        // Receiver Details Not Present in DB
+        Success(RECEIVER_NOT_EXISTS)
       }
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(
+        e.message ?: "Unable to get Receiver Details from Firebase while creating initial chatRoom"
+      )
+    }
   }
 
-  fun checkIfChatRoomExistsOrNotInDb(
+  suspend fun checkIfReceiverExistsWithLoginInFireBase(
+    mobileNumber: String,
+  ): FireStoreResult<Pair<Boolean, String>> {
+    return try {
+      val receiverSnap = FirebaseFirestore.getInstance().collection(DEFAULT_USERS_COLLECTION_NAME)
+        .document(mobileNumber)
+        .get().await()
+
+      if (receiverSnap.exists()) {
+        // Receiver Details Exists in DB
+        val user = receiverSnap.toObject(User::class.java)
+          ?: return FireStoreResult.Error("Receiver's user object parsed as null")
+
+        if (user.userId.isNotEmpty()) {
+          //Receiver logged In
+          Success(Pair(true, user.userId))
+        } else {
+          //Receiver Not logged In
+          Success(Pair(false, ""))
+        }
+      } else {
+        // Receiver Details Not Present in DB
+        Success(Pair(false, ""))
+      }
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(
+        e.message ?: "Unable to get Receiver Details from Firebase while adding message to chatRoom"
+      )
+    }
+  }
+
+  sealed class ChatRoomExistStatus {
+    data class Exist(val roomId: String) : ChatRoomExistStatus()
+    object NotExist : ChatRoomExistStatus()
+  }
+
+  suspend fun checkIfNumberTypeChatRoomExistsOrNotInDb(
     senderTag: String,
     receiverTag: String,
-    onFailed: (String) -> Unit,
-    onChatRoomExist: (String) -> Unit,
-    onChatRoomDoesNotExist: () -> Unit,
-  ) {
+  ): FireStoreResult<ChatRoomExistStatus> {
 
-    if (currentUser == null) {
-      onFailed.invoke("Current FB User is Null")
-      return
-    }
+    return try {
 
-    if (currentUser!!.phoneNumber == null) {
-      onFailed.invoke("Current FB User PhoneNumber is Null")
-      return
-    }
+      if (currentUser == null) {
+        FireStoreResult.Error("Current FB User is Null")
+      } else if (currentUser!!.phoneNumber == null) {
+        FireStoreResult.Error("Current FB User PhoneNumber is Null")
+      } else {
 
-    //chat room may be initiated by user or receiver - chat Room id will be senderTag#receiverTag
-    // we are checks roomId in both cases
-    val oldChatRoomId1 = senderTag.plus(DEFAULT_CHAT_ROOM_SEPARATOR).plus(receiverTag)
-    val oldChatRoomId2 = receiverTag.plus(DEFAULT_CHAT_ROOM_SEPARATOR).plus(senderTag)
+        //chat room may be initiated by user or receiver - chat Room id will be senderTag#receiverTag
+        // we are checks roomId in both cases
+        val oldChatRoomId1 = senderTag.plus(DEFAULT_CHAT_ROOM_SEPARATOR).plus(receiverTag)
+        val oldChatRoomId2 = receiverTag.plus(DEFAULT_CHAT_ROOM_SEPARATOR).plus(senderTag)
 
-    FirebaseFirestore.getInstance().collection(DEFAULT_CHATROOM_COLLECTION_NAME)
-      .document(oldChatRoomId1)
-      .get()
-      .addOnSuccessListener {
-        if (it.exists()) {
-          onChatRoomExist.invoke(oldChatRoomId1)
-        } else {
+        val resultSnap =
           FirebaseFirestore.getInstance().collection(DEFAULT_CHATROOM_COLLECTION_NAME)
-            .document(oldChatRoomId2)
-            .get()
-            .addOnSuccessListener { doc ->
-              if (doc.exists()) {
-                onChatRoomExist.invoke(oldChatRoomId2)
-              } else {
-                onChatRoomDoesNotExist.invoke()
-              }
-            }
-            .addOnFailureListener { e ->
-              onFailed.invoke(e.message ?: "Failed to get existing Number Type Room Document 2")
-            }
+            .document(oldChatRoomId1)
+            .get().await()
+
+        if (resultSnap.exists()) {
+          Success(ChatRoomExistStatus.Exist(oldChatRoomId1))
+        } else {
+          val resultSnap2 =
+            FirebaseFirestore.getInstance().collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+              .document(oldChatRoomId2)
+              .get().await()
+
+          if (resultSnap2.exists()) {
+            Success(ChatRoomExistStatus.Exist(oldChatRoomId2))
+          } else {
+            Success(ChatRoomExistStatus.NotExist)
+          }
         }
       }
-      .addOnFailureListener { e ->
-        onFailed.invoke(e.message ?: "Failed to get existing Number Type Room Document 1")
-      }
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(e.message ?: "Failed to get existing Number Type Room Document 1 or 2")
+    }
   }
 
-  fun changeExistingRoomTypeFromNumberToUserId(
+  suspend fun changeExistingRoomTypeFromNumberToUserId(
     receiverId: String,
     existingRoomId: String,
-    onFailed: (String) -> Unit,
-    onSuccess: (String) -> Unit,
-  ) {
+  ): FireStoreResult<String> {
 
     if (currentUser == null) {
-      onFailed.invoke("Got Current User Null")
-      return
+      return FireStoreResult.Error("Got Current User Null")
     }
 
     val senderId = currentUser!!.uid
     val newChatRoomId = senderId.plus(DEFAULT_CHAT_ROOM_SEPARATOR).plus(receiverId)
 
-    //Getting Existing Number Type Room
-    FirebaseFirestore.getInstance()
-      .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
-      .document(existingRoomId)
-      .get()
-      .addOnFailureListener { e ->
-        onFailed.invoke(
-          e.message ?: "Failed to get existing Room while renaming"
-        )
-      }
-      .addOnSuccessListener {
-        val existingData = it.data
+    return try {
+      val resultSnap = FirebaseFirestore.getInstance().collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+        .document(existingRoomId)
+        .get().await()
 
-        if (existingData == null) {
-          onFailed.invoke("Got Existing Room Data Null")
-        }
+      val existingData = resultSnap.data
+      if (existingData == null) {
+        FireStoreResult.Error("Got Existing Room Data Null")
+      } else {
 
         //Creates new UserId type Room
-        FirebaseFirestore.getInstance().collection(DEFAULT_CHATROOM_COLLECTION_NAME)
-          .document(newChatRoomId)
-          .set(existingData ?: mapOf(DEFAULT__MESSAGE_COLLECTION_NAME to ""))
-          .addOnFailureListener { e ->
-            onFailed.invoke(
-              e.message ?: "Failed to create userIdType Room while renaming"
-            )
-          }
-          .addOnSuccessListener {
+        val newChatRoomRef =
+          FirebaseFirestore.getInstance().collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+            .document(newChatRoomId)
 
-            //Deleting Old Number Type Room
-            FirebaseFirestore.getInstance().collection(DEFAULT_CHATROOM_COLLECTION_NAME)
-              .document(existingRoomId)
-              .delete()
-              .addOnFailureListener { e ->
-                onFailed.invoke(
-                  e.message ?: "Failed to delete existing Room while renaming"
-                )
-              }
-              .addOnSuccessListener {
-                onSuccess.invoke(newChatRoomId)
-              }
-          }
+        FirebaseFirestore.getInstance().runTransaction {
+          it.set(newChatRoomRef, existingData)
+        }.await()
+
+        val oldNumberChatRoomRef =
+          FirebaseFirestore.getInstance().collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+            .document(existingRoomId)
+
+        //Deleting Old Number Type Room
+        FirebaseFirestore.getInstance().runTransaction {
+          it.delete(oldNumberChatRoomRef)
+        }.await()
+
+        Success(newChatRoomId)
       }
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(e.message ?: "exception in changeExistingRoomTypeFromNumberToUserId")
+    }
   }
 
-  fun createNotLoggedInReceiverDetailsInDB(
+  suspend fun createNotLoggedInReceiverDetailsInDB(
     mobileNumber: String,
     name: String,
     photo: String,
     chatRoomIds: List<String>,
-    onFailed: (String) -> Unit,
-    onNotLoggedInReceiverCreated: () -> Unit,
-  ) {
+  ): FireStoreResult<Unit> {
+
+    val ref = FirebaseFirestore.getInstance().collection(DEFAULT_USERS_COLLECTION_NAME)
+      .document(mobileNumber)
 
     val notLoggedInReceiver = User(
       mobileNumber = mobileNumber,
@@ -792,211 +969,222 @@ object FirebaseUtils {
       photo = photo,
       chatRoomIds = chatRoomIds
     )
-    FirebaseFirestore.getInstance().collection(DEFAULT_USERS_COLLECTION_NAME).document(mobileNumber)
-      .set(notLoggedInReceiver)
-      .addOnFailureListener {
-        onFailed.invoke(
-          it.message ?: "Failed to Create not Logged In Receiver User Details"
-        )
-      }
-      .addOnSuccessListener {
-        onNotLoggedInReceiverCreated.invoke()
-      }
+
+    return try {
+      FirebaseFirestore.getInstance().runTransaction {
+        it.set(ref, notLoggedInReceiver)
+      }.await()
+      Success(Unit)
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(e.message ?: "Failed to Create not Logged In Receiver User Details")
+    }
   }
 
-  fun updateChatRoomIdInSendUserDocument(
+  suspend fun updateChatRoomIdInSendUserDocument(
     chatRoomIds: List<String>,
-    onFailed: (String) -> Unit,
-    onChatRoomIdsUpdated: () -> Unit,
-  ) {
+  ): FireStoreResult<Unit> {
+    return try {
+      if (currentUser == null) {
+        FireStoreResult.Error("Got Null for Fb Current User")
+      } else if (currentUser!!.phoneNumber == null) {
+        FireStoreResult.Error("Got Null for Fb Current User Phone No")
+      } else {
 
-    if (currentUser == null) {
-      onFailed.invoke("Got Null for Fb Current User")
-    }
+        val ref = FirebaseFirestore.getInstance()
+          .collection(DEFAULT_USERS_COLLECTION_NAME)
+          .document(currentUser!!.phoneNumber!!)
 
-    if (currentUser!!.phoneNumber == null) {
-      onFailed.invoke("Got Null for Fb Current User Phone No")
-    }
+        val data = mapOf(User.chatRoomIdsKey to chatRoomIds)
 
-    FirebaseFirestore.getInstance()
-      .collection(DEFAULT_USERS_COLLECTION_NAME)
-      .document(currentUser!!.phoneNumber!!)
-      .update(mapOf(User.chatRoomIdsKey to chatRoomIds))
-      .addOnFailureListener {
-        onFailed.invoke(
-          it.message ?: "Failed to update ChatRoomIds in Sender"
-        )
+        FirebaseFirestore.getInstance().runTransaction {
+          it.update(ref, data)
+        }.await()
+
+        Success(Unit)
       }
-      .addOnSuccessListener { onChatRoomIdsUpdated.invoke() }
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(e.message ?: "Failed to update ChatRoomIds in Sender")
+    }
   }
 
-  fun getExistingChatRoomIdsForUser(
+  suspend fun getExistingChatRoomIdsForUser(
     mobileNumber: String,
-    onExistingChatRoomIdsFetched: (List<String>) -> Unit,
-    onFailed: (String) -> Unit,
-  ) {
-    FirebaseFirestore.getInstance().collection(DEFAULT_USERS_COLLECTION_NAME)
-      .document(mobileNumber)
-      .get()
-      .addOnSuccessListener {
+  ): FireStoreResult<List<String>> {
+    return try {
+      val resultSnap = FirebaseFirestore.getInstance().collection(DEFAULT_USERS_COLLECTION_NAME)
+        .document(mobileNumber)
+        .get().await()
 
-        val user = it.toObject(User::class.java)
-        if (user == null) {
-          onFailed.invoke("User Parsed as null while checking Existing ChatRoomIds")
-          return@addOnSuccessListener
-        }
+      val user = resultSnap.toObject(User::class.java)
+      if (user == null) {
+        FireStoreResult.Error("User Parsed as null while checking Existing ChatRoomIds")
+      } else {
         val existingChatRooms = user.chatRoomIds
-        onExistingChatRoomIdsFetched.invoke(existingChatRooms)
+        Success(existingChatRooms)
       }
-      .addOnFailureListener {
-        onFailed.invoke(it.message ?: "Failed to fetch existing chatRoomIds")
-      }
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(e.message ?: "Failed to fetch existing chatRoomIds")
+    }
   }
 
-  fun createChatRoomInFirebase(
+  suspend fun createChatRoomInFirebase(
     chatRoomId: String,
     message: Message,
-    onChatRoomCreated: (String) -> Unit,
-    onChatRoomCreateFailed: (String) -> Unit,
-  ) {
-    FirebaseFirestore
+  ): FireStoreResult<String> {
+    return try {
+      val messageRef = FirebaseFirestore
+        .getInstance()
+        .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+        .document(chatRoomId)
+        .collection(DEFAULT__MESSAGE_COLLECTION_NAME)
+        .document(message.id.toString())
+
+      FirebaseFirestore.getInstance().runTransaction {
+        val data = mapOf(message.id.toString() to message)
+        it.set(messageRef, data)
+      }
+
+      val createLastMessageResult = setLatestMessageInChatRoomDocument(
+        chatRoomId = chatRoomId,
+        message = message,
+      )
+
+      if (createLastMessageResult is FireStoreResult.Error) {
+        FireStoreResult.Error(errorMessage = createLastMessageResult.errorMessage)
+      } else {
+        Success(chatRoomId)
+      }
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(e.message ?: "Firebase Exception: While Creating ChatRoom")
+    }
+  }
+
+  private suspend fun setLatestMessageInChatRoomDocument(
+    chatRoomId: String,
+    message: Message,
+  ): FireStoreResult<Unit> {
+    return try {
+      val chatRoomRef = FirebaseFirestore
+        .getInstance()
+        .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+        .document(chatRoomId)
+
+      FirebaseFirestore.getInstance().runTransaction {
+        val data = mapOf(Message.latestMessageKey to message)
+        it.set(chatRoomRef, data)
+      }.await()
+
+      Success(Unit)
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(e.message ?: "Failed to update latest Message in ChatRoom Document")
+    }
+  }
+
+  private suspend fun updateLatestMessageInChatRoomDocument(
+    chatRoomId: String,
+    message: Message,
+  ): FireStoreResult<Unit> {
+
+    val chatRoomRef = FirebaseFirestore
       .getInstance()
       .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
       .document(chatRoomId)
-      .collection(DEFAULT__MESSAGE_COLLECTION_NAME)
-      .document(message.id.toString())
-      .set(mapOf(message.id.toString() to message))
-      .addOnSuccessListener {
-        setLatestMessageInChatRoomDocument(
-          chatRoomId = chatRoomId,
-          message = message,
-          onFailed = onChatRoomCreateFailed,
-          onLatestMessageSaved = {
-            // we successfully created chatRoom and saved Latest Message.
-            onChatRoomCreated.invoke(chatRoomId)
-          }
-        )
-      }
-      .addOnFailureListener {
-        onChatRoomCreateFailed.invoke(it.message ?: "Failed to create Chat Room")
-      }
+
+    val data = mapOf(Message.latestMessageKey to message)
+
+    return try {
+      FirebaseFirestore.getInstance().runTransaction {
+        it.update(chatRoomRef, data)
+      }.await()
+      Success(Unit)
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(e.message ?: "Failed to update latest Message in ChatRoom Document")
+    }
   }
 
-  private fun setLatestMessageInChatRoomDocument(
-    chatRoomId: String,
-    message: Message,
-    onFailed: (String) -> Unit,
-    onLatestMessageSaved: () -> Unit,
-  ) {
-    FirebaseFirestore
-      .getInstance()
-      .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
-      .document(chatRoomId)
-      .set(mapOf(Message.latestMessageKey to message))
-      .addOnFailureListener {
-        onFailed.invoke(
-          it.message ?: "Failed to update latest Message in ChatRoom Document"
-        )
-      }
-      .addOnSuccessListener { onLatestMessageSaved.invoke() }
-  }
-
-  private fun updateLatestMessageInChatRoomDocument(
-    chatRoomId: String,
-    message: Message,
-    onFailed: (String) -> Unit,
-    onLatestMessageSaved: () -> Unit,
-  ) {
-    FirebaseFirestore
-      .getInstance()
-      .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
-      .document(chatRoomId)
-      .update(mapOf(Message.latestMessageKey to message))
-      .addOnFailureListener {
-        onFailed.invoke(
-          it.message ?: "Failed to update latest Message in ChatRoom Document"
-        )
-      }
-      .addOnSuccessListener { onLatestMessageSaved.invoke() }
-  }
-
-  fun updateParticipantsDetailsInChatRoom(
+  suspend fun updateParticipantsDetailsInChatRoom(
     senderNumber: String,
     receiverNumber: String,
     chatRoomId: String,
-    onFailed: (String) -> Unit,
-    onParticipantDetailsUpdated: () -> Unit,
-  ) {
+  ): FireStoreResult<Unit> {
 
     val participantDetails = senderNumber.plus(DEFAULT_CHAT_ROOM_SEPARATOR).plus(receiverNumber)
 
-    FirebaseFirestore.getInstance()
-      .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
-      .document(chatRoomId)
-      .update(mapOf(Message.participantsKey to participantDetails))
-      .addOnFailureListener {
-        onFailed.invoke(
-          it.message ?: "Failed to update participant details in ChatRoom"
-        )
-      }
-      .addOnSuccessListener {
-        onParticipantDetailsUpdated.invoke()
-      }
+    return try {
+      FirebaseFirestore.getInstance().runTransaction {
+        val ref = FirebaseFirestore.getInstance()
+          .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+          .document(chatRoomId)
+        val data = mapOf(Message.participantsKey to participantDetails)
+        it.update(ref, data)
+      }.await()
+      Success(Unit)
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(e.message ?: "Failed to update participant details in ChatRoom")
+    }
   }
 
-  fun updateChatRoomIdsInSenderAndReceiverDetails(
+  suspend fun updateChatRoomIdsInSenderAndReceiverDetails(
     chatRoomId: String,
     senderNumber: String,
     receiverMobileNumber: String,
-    onFailed: (String) -> Unit,
-    onSuccess: () -> Unit,
-  ) {
+  ): FireStoreResult<Unit> {
 
     //Getting Old ChatRoom Ids for Sender
-    getExistingChatRoomIdsForUser(senderNumber,
-      onFailed = onFailed,
-      onExistingChatRoomIdsFetched = { oldSenderRoomIds ->
-        val senderChatRooms = mutableListOf<String>()
-        senderChatRooms.addAll(oldSenderRoomIds)
-        senderChatRooms.add(chatRoomId)
-        //Updating new ChatRoomId appended with OldChatRoomIds to Sender
-        FirebaseFirestore.getInstance().collection(DEFAULT_USERS_COLLECTION_NAME)
+    val existingSenderChatRoomsResult = getExistingChatRoomIdsForUser(senderNumber)
+
+    if (existingSenderChatRoomsResult is FireStoreResult.Error) {
+      return FireStoreResult.Error(existingSenderChatRoomsResult.errorMessage)
+    }
+
+    val senderChatRooms = mutableListOf<String>()
+    senderChatRooms.addAll((existingSenderChatRoomsResult as Success).data)
+    senderChatRooms.add(chatRoomId)
+    //Updating new ChatRoomId appended with OldChatRoomIds to Sender
+
+    try {
+      FirebaseFirestore.getInstance().runTransaction {
+        val senderRef = FirebaseFirestore.getInstance().collection(DEFAULT_USERS_COLLECTION_NAME)
           .document(senderNumber)
-          .update(mapOf(User.chatRoomIdsKey to senderChatRooms))
-          .addOnFailureListener {
-            onFailed.invoke(
-              it.message ?: "Failed to update new Chat Room Id to Sender"
-            )
-          }
-          .addOnSuccessListener {
-            //Getting Old ChatRoom Ids for Receiver
-            getExistingChatRoomIdsForUser(
-              receiverMobileNumber,
-              onFailed = onFailed,
-              onExistingChatRoomIdsFetched = { oldReceiverRoomIds ->
-                val receiverChatRooms = oldReceiverRoomIds.toMutableList()
-                receiverChatRooms.add(chatRoomId)
-                //Updating new ChatRoomId appended with OldChatRoomIds to Receiver
-                FirebaseFirestore.getInstance().collection(DEFAULT_USERS_COLLECTION_NAME)
-                  .document(receiverMobileNumber)
-                  .update(mapOf(User.chatRoomIdsKey to receiverChatRooms))
-                  .addOnFailureListener {
-                    onFailed.invoke(
-                      it.message ?: "Failed to update new Chat Room Id to Receiver"
-                    )
-                  }
-                  .addOnSuccessListener {
-                    onSuccess.invoke()
-                  }
-              })
-          }
-      })
+        val data = mapOf(User.chatRoomIdsKey to senderChatRooms)
+        it.update(senderRef, data)
+      }.await()
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(e.message ?: "Failed to update new Chat Room Id to Sender")
+    }
+
+    //Getting Old ChatRoom Ids for Receiver
+    val existReceiverChatRoomsResult = getExistingChatRoomIdsForUser(receiverMobileNumber)
+
+    if (existReceiverChatRoomsResult is FireStoreResult.Error) {
+      return FireStoreResult.Error(existReceiverChatRoomsResult.errorMessage)
+    }
+
+    val receiverChatRooms = mutableListOf<String>()
+    receiverChatRooms.addAll((existReceiverChatRoomsResult as Success).data)
+    receiverChatRooms.add(chatRoomId)
+
+    return try {
+      //Updating new ChatRoomId appended with OldChatRoomIds to Receiver
+
+      FirebaseFirestore.getInstance().runTransaction {
+        val receiverRef = FirebaseFirestore.getInstance().collection(DEFAULT_USERS_COLLECTION_NAME)
+          .document(receiverMobileNumber)
+        val data = mapOf(User.chatRoomIdsKey to receiverChatRooms)
+
+        it.update(receiverRef, data)
+      }.await()
+
+      Success(Unit)
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(e.message ?: "Failed to update new Chat Room Id to Receiver")
+    }
   }
 
   suspend fun getMessagesFromChatRoom(
     chatRoomId: String,
     onFailed: (String) -> Unit,
-    onMessagesFetched: (List<Message>) -> Unit
+    onMessagesFetched: (List<Message>) -> Unit,
   ) {
 
     try {
@@ -1019,7 +1207,7 @@ object FirebaseUtils {
           message = messageValueMap[Message.messageKey] as String,
           senderId = messageValueMap[Message.senderIdKey] as String,
           receiverId = messageValueMap[Message.receiverIdKey] as String,
-          isMessageModeOn = messageValueMap[Message.isMessageModeOnKey] as Boolean,
+          isSentByMessageMode = messageValueMap[Message.isSentByMessageModeKey] as Boolean,
           status = (messageValueMap[Message.statusKey] as Long).toInt(),
           sentTime = messageValueMap[Message.sentTimeKey] as Long,
           receivedTime = messageValueMap[Message.receivedTimeKey] as Long,
@@ -1037,66 +1225,163 @@ object FirebaseUtils {
     } catch (e: Exception) {
       onFailed.invoke(e.message ?: "Failed to get Messages From ChatRoom")
     }
-
   }
 
-  fun updateMessageInChatRoom(
+  suspend fun updateMessageStatus(
+    status: Int,
     roomId: String,
-    message: Message,
-    onFailed: (String) -> Unit,
-    onMessageUpdatedInChatRoom: (Message) -> Unit,
-  ) {
-    checkChatRoomExistsOrNotInDb(roomId, onFailed = onFailed, onChatRoomExists = { exists ->
-      if (exists.not()) {
-        onFailed.invoke("Provided ChatRoom not exist. can't able to send  thisMessage")
-      } else {
-        FirebaseFirestore.getInstance()
-          .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
-          .document(roomId)
-          .collection(DEFAULT__MESSAGE_COLLECTION_NAME)
-          .document(message.id.toString())
-          .set(mapOf(message.id.toString() to message))
-          .addOnFailureListener {
-            onFailed.invoke(
-              it.message ?: "Failed to update Message in ChatRoom"
-            )
-          }
-          .addOnSuccessListener {
-            updateLatestMessageInChatRoomDocument(
-              chatRoomId = roomId,
-              message = message,
-              onFailed = onFailed,
-              onLatestMessageSaved = {
-                onMessageUpdatedInChatRoom.invoke(message)
-              })
-          }
-      }
-    })
-  }
+    messageId: Int,
+  ): FireStoreResult<Unit> {
 
-  private fun checkChatRoomExistsOrNotInDb(
-    roomId: String,
-    onFailed: (String) -> Unit,
-    onChatRoomExists: (Boolean) -> Unit,
-  ) {
-    FirebaseFirestore.getInstance()
+    val existingMessageRef = FirebaseFirestore
+      .getInstance()
       .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
       .document(roomId)
-      .get().addOnFailureListener {
-        onFailed.invoke(
-          it.message ?: "Failed while checking existing chatRoom before send new Messsage"
-        )
+      .collection(DEFAULT__MESSAGE_COLLECTION_NAME)
+      .document(messageId.toString())
+
+    val existingMessageMapDoc = existingMessageRef.get().await()
+
+    val existingMessageMap = existingMessageMapDoc.data as HashMap<String, HashMap<String, Any>>
+    val messageValueMap = existingMessageMap[messageId.toString()]
+
+    val updatedMessage = Message(
+      id = (messageValueMap?.get(Message.idKey) as Long).toInt(),
+      message = messageValueMap[Message.messageKey] as String,
+      senderId = messageValueMap[Message.senderIdKey] as String,
+      receiverId = messageValueMap[Message.receiverIdKey] as String,
+      isSentByMessageMode = messageValueMap[Message.isSentByMessageModeKey] as Boolean,
+      status = status,
+      sentTime = messageValueMap[Message.sentTimeKey] as Long,
+      receivedTime = messageValueMap[Message.receivedTimeKey] as Long,
+    )
+
+    return try {
+      FirebaseFirestore.getInstance().runTransaction {
+        it.set(existingMessageRef, updatedMessage)
+      }.await()
+
+      val updateLatestMessageResult = updateLatestMessageStatus(status = status, roomId = roomId)
+
+      if (updateLatestMessageResult is FireStoreResult.Error) {
+        FireStoreResult.Error(updateLatestMessageResult.errorMessage)
+      } else {
+        Success(Unit)
       }
-      .addOnSuccessListener {
-        onChatRoomExists.invoke(it.exists())
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(e.message ?: "exception got while updating message staus")
+    }
+  }
+
+  private suspend fun updateLatestMessageStatus(
+    status: Int,
+    roomId: String
+  ): FireStoreResult<Unit> {
+
+    val latestMessageRef =
+      FirebaseFirestore.getInstance()
+      .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+      .document(roomId)
+
+    val latestMessageMapDoc = latestMessageRef.get().await()
+
+    val latestMessageMap = latestMessageMapDoc.data as HashMap<String, HashMap<String, Any>>
+    val latestMessageValueMap = latestMessageMap[Message.latestMessageKey]
+
+    val updatedLatestMessage = Message(
+      id = (latestMessageValueMap?.get(Message.idKey) as Long).toInt(),
+      message = latestMessageValueMap[Message.messageKey] as String,
+      senderId = latestMessageValueMap[Message.senderIdKey] as String,
+      receiverId = latestMessageValueMap[Message.receiverIdKey] as String,
+      isSentByMessageMode = latestMessageValueMap[Message.isSentByMessageModeKey] as Boolean,
+      status = status,
+      sentTime = latestMessageValueMap[Message.sentTimeKey] as Long,
+      receivedTime = latestMessageValueMap[Message.receivedTimeKey] as Long,
+    )
+
+    return try {
+      FirebaseFirestore.getInstance().runTransaction {
+        it.update(latestMessageRef, mapOf(Message.latestMessageKey to updatedLatestMessage))
+      }.await()
+
+      Success(Unit)
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(e.message ?: "exception got while updating latest message staus")
+    }
+  }
+
+  suspend fun updateMessageInChatRoom(
+    roomId: String,
+    message: Message,
+  ): FireStoreResult<Message> {
+    val checkExistChatRoomResult = checkChatRoomExistsOrNotInDb(roomId = roomId)
+
+    return if (checkExistChatRoomResult is FireStoreResult.Error) {
+      FireStoreResult.Error(checkExistChatRoomResult.errorMessage)
+    } else {
+
+      when ((checkExistChatRoomResult as Success).data) {
+        true -> {
+          // ChatRoom Exists we can update the message
+
+          val messageRef = FirebaseFirestore.getInstance()
+            .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+            .document(roomId)
+            .collection(DEFAULT__MESSAGE_COLLECTION_NAME)
+            .document(message.id.toString())
+
+          val data = mapOf(message.id.toString() to message)
+
+          try {
+            FirebaseFirestore.getInstance().runTransaction {
+              it.set(messageRef, data)
+            }.await()
+
+            val updateLatestMessageResult = updateLatestMessageInChatRoomDocument(
+              chatRoomId = roomId,
+              message = message
+            )
+
+            if (updateLatestMessageResult is FireStoreResult.Error) {
+              FireStoreResult.Error(updateLatestMessageResult.errorMessage)
+            } else {
+              Success(message)
+            }
+          } catch (e: FirebaseException) {
+            FireStoreResult.Error(e.message ?: "Failed to update Message in ChatRoom")
+          }
+        }
+
+        false -> {
+          //ChatRoom Not Exists
+          FireStoreResult.Error("Provided ChatRoom not exist. can't able to send  thisMessage")
+        }
       }
+    }
+  }
+
+  private suspend fun checkChatRoomExistsOrNotInDb(
+    roomId: String,
+  ): FireStoreResult<Boolean> {
+    return try {
+      val resultSnap = FirebaseFirestore.getInstance()
+        .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+        .document(roomId)
+        .get().await()
+
+      Success(resultSnap.exists())
+    } catch (e: FirebaseException) {
+      FireStoreResult.Error(
+        e.message ?: "Failed while checking existing chatRoom before send new Messsage"
+      )
+    }
   }
 
   fun listenMessagesForChatRoom(
     chatRoomId: String,
     onFailed: (String) -> Unit,
-    onMessageUpdated: () -> Unit
-    ) {
+    onMessageUpdated: (List<Message>) -> Unit,
+  ) {
     FirebaseFirestore.getInstance().collection(DEFAULT_CHATROOM_COLLECTION_NAME)
       .document(chatRoomId)
       .collection(DEFAULT__MESSAGE_COLLECTION_NAME)
@@ -1104,7 +1389,18 @@ object FirebaseUtils {
         if (error != null) {
           onFailed.invoke(error.message ?: "Failed to listen message in room Id:  $chatRoomId")
         } else {
-          onMessageUpdated.invoke()
+          if (value == null) {
+            onFailed.invoke("Got value null")
+          } else if (value.documents.isEmpty()) {
+            onFailed.invoke("Got Message Documents Empty")
+          } else {
+            val messages = value.documents.mapNotNull { it.toObject(Message::class.java) }
+            if (messages.isEmpty()) {
+              onFailed.invoke("Got Message Documents Empty after parsing")
+            } else {
+              onMessageUpdated.invoke(messages)
+            }
+          }
         }
       }
   }
@@ -1113,7 +1409,7 @@ object FirebaseUtils {
     receiverNumber: String,
     photoData: ByteArray,
     onFailed: (String) -> Unit,
-    onSuccess: (String) -> Unit
+    onSuccess: (String) -> Unit,
   ) {
     val imageRef = FirebaseStorage.getInstance().reference.child(
       DEFAULT_DIRECTORY_NAME_FOR_PROFILE_IN_FIREBASE
@@ -1132,17 +1428,68 @@ object FirebaseUtils {
       }
   }
 
+  fun updateLastChatRoomUpdatedAtInProfile(
+    currentTimeInMillis: Long,
+  ): FireStoreResult<Unit> {
+    return if (currentUser == null) {
+      FireStoreResult.Error("Got Null for Fb Current User")
+    } else if (currentUser!!.phoneNumber == null) {
+      FireStoreResult.Error("Got Null for Fb Current User Phone No")
+    } else {
+      val profileRef = FirebaseFirestore.getInstance().collection(DEFAULT_USERS_COLLECTION_NAME)
+        .document(currentUser!!.phoneNumber!!)
+
+      val data = mapOf(User.lastRoomCreatedAtKey to currentTimeInMillis)
+
+      try {
+        FirebaseFirestore.getInstance().runTransaction {
+          it.update(profileRef, data)
+        }
+        Success(Unit)
+      } catch (e: FirebaseException) {
+        FireStoreResult.Error(e.message ?: "Failed to update lastRoomCreatedAtKey in User")
+      }
+    }
+  }
+
+  fun updateLastChatRoomUpdatedAtInChatRoom(
+    roomId: String,
+    currentTimeInMillis: Long,
+  ): FireStoreResult<Unit> {
+    return if (currentUser == null) {
+      FireStoreResult.Error("Got Null for Fb Current User")
+    } else if (currentUser!!.phoneNumber == null) {
+      FireStoreResult.Error("Got Null for Fb Current User Phone No")
+    } else {
+      val chatRoomRef = FirebaseFirestore.getInstance().collection(DEFAULT_CHATROOM_COLLECTION_NAME)
+        .document(roomId)
+      val data = mapOf(Message.roomCreatedAtKey to currentTimeInMillis)
+      try {
+        FirebaseFirestore.getInstance().runTransaction {
+          it.update(chatRoomRef, data)
+        }
+        Success(Unit)
+      } catch (e: FirebaseException) {
+        FireStoreResult.Error(e.message ?: "Failed to update lastRoomCreatedAtKey in User")
+      }
+    }
+  }
+
   //Todo remove below method if not needed
   fun getLastMessageIdInChatRoom(
     roomId: String,
     onFailed: (String) -> Unit,
-    onLastMessageIdFetched: (Int) -> Unit
+    onLastMessageIdFetched: (Int) -> Unit,
   ) {
     FirebaseFirestore.getInstance()
       .collection(DEFAULT_CHATROOM_COLLECTION_NAME)
       .document(roomId)
       .get()
-      .addOnFailureListener {  onFailed.invoke(it.message ?: "Failed to get LastMessage Id In ChatRoom")}
+      .addOnFailureListener {
+        onFailed.invoke(
+          it.message ?: "Failed to get LastMessage Id In ChatRoom"
+        )
+      }
       .addOnSuccessListener {
         val message = it.toObject(Message::class.java)
 

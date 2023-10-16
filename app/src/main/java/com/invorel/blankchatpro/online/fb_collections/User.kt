@@ -1,5 +1,7 @@
 package com.invorel.blankchatpro.online.fb_collections
 
+import com.google.firebase.firestore.PropertyName
+
 data class User(
   val userId: String = "",
   val mobileNumber: String = "",
@@ -9,17 +11,21 @@ data class User(
   val name: String = "",
   val about: String = "",
   val photo: String = "",
-  val chatRoomIds: List<String> = listOf()
+  val chatRoomIds: List<String> = listOf(),
+  @field:PropertyName("lastProfileUpdatedAt")
+  val lastProfileUpdatedAt: Long = -1L,
 ) {
   companion object {
-    const val chatRoomIdsKey ="chatRoomIds"
-    const val userIdKey ="userId"
-    const val fcmTokenKey ="fcmToken"
-    const val nameKey ="name"
-    const val aboutKey ="about"
-    const val profilePhotoKey ="photo"
-    const val genderKey ="gender"
-    const val isOnlineKey ="isOnline"
+    const val chatRoomIdsKey = "chatRoomIds"
+    const val userIdKey = "userId"
+    const val fcmTokenKey = "fcmToken"
+    const val nameKey = "name"
+    const val aboutKey = "about"
+    const val profilePhotoKey = "photo"
+    const val genderKey = "gender"
+    const val isOnlineKey = "isOnline"
+    const val lastRoomCreatedAtKey = "lastRoomCreatedAt"
+    const val lastProfileUpdatedAt = "lastProfileUpdatedAt"
   }
 }
 

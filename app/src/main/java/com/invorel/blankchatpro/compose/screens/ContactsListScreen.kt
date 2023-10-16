@@ -64,7 +64,7 @@ import kotlinx.coroutines.launch
 
   val state = viewModel.uiState.collectAsState().value
   val context = LocalContext.current
-  val filteredContacts =  remember(state.searchQuery) {
+  val filteredContacts =  remember(state.contactsList, state.searchQuery) {
     derivedStateOf {
       state.contactsList.filter { it.name.contains(state.searchQuery, ignoreCase = true) || it.number.contains(state.searchQuery, ignoreCase = true) }
     }

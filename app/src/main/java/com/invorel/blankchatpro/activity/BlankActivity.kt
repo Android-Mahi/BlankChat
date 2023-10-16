@@ -31,6 +31,7 @@ import com.invorel.blankchatpro.compose.screens.ProfileUpdateScreen
 import com.invorel.blankchatpro.compose.screens.SplashScreen
 import com.invorel.blankchatpro.compose.screens.TermsConditionsScreen
 import com.invorel.blankchatpro.constants.DEFAULT_USER_NAME
+import com.invorel.blankchatpro.local.repo.LocalRepo
 import com.invorel.blankchatpro.ui.theme.BlankChatProTheme
 import com.invorel.blankchatpro.ui.theme.black
 import com.invorel.blankchatpro.utils.ContentResolverUtils
@@ -65,11 +66,11 @@ class BlankActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
 
     val appContext = (applicationContext as BlankApp)
-    val loginViewModel = LoginViewModel(appContext.dataStore)
-    val profileViewModel = ProfileViewModel(appContext.dataStore)
-    val homeViewModel = HomeViewModel(appContext.dataStore)
-    val contactsViewModel = ContactsViewModel(appContext.localDb)
-    val chatsViewModel = ChatsViewModel(appContext.localDb)
+    val loginViewModel = LoginViewModel(dataStore = appContext.dataStore, localRepo = LocalRepo(appContext.localDb))
+    val profileViewModel = ProfileViewModel(dataStore = appContext.dataStore, localRepo = LocalRepo(appContext.localDb))
+    val homeViewModel = HomeViewModel(dataStore = appContext.dataStore, localRepo = LocalRepo(appContext.localDb))
+    val contactsViewModel = ContactsViewModel(localDatabase = appContext.localDb)
+    val chatsViewModel = ChatsViewModel(localRepo = LocalRepo(appContext.localDb))
     setContent {
       RootCompose(
         loginViewModel = loginViewModel,

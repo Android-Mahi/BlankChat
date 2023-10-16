@@ -22,7 +22,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.outlined.KeyboardArrowLeft
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -41,6 +40,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale.Companion
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.invorel.blankchatpro.R.drawable
 import com.invorel.blankchatpro.R.string
+import com.invorel.blankchatpro.compose.common.BackPressHandler
 import com.invorel.blankchatpro.compose.common.BlankMoreIcon
 import com.invorel.blankchatpro.compose.common.BlankTextField
 import com.invorel.blankchatpro.compose.common.HorizontalSpacer
@@ -58,15 +59,16 @@ import com.invorel.blankchatpro.compose.common.VerticalSpacer
 import com.invorel.blankchatpro.constants.DEFAULT_PROFILE_MAN_IMAGE
 import com.invorel.blankchatpro.extensions.showToast
 import com.invorel.blankchatpro.extensions.trimNameToMaxLength
-import com.invorel.blankchatpro.online.fb_collections.Message
 import com.invorel.blankchatpro.ui.theme.black
 import com.invorel.blankchatpro.ui.theme.darkGrey
 import com.invorel.blankchatpro.ui.theme.lightGrey1
 import com.invorel.blankchatpro.ui.theme.white
 import com.invorel.blankchatpro.ui.theme.white1
 import com.invorel.blankchatpro.utils.FirebaseUtils
+import com.invorel.blankchatpro.utils.NetWorkUtils
 import com.invorel.blankchatpro.viewModels.ChatReceiverDetails
 import com.invorel.blankchatpro.viewModels.ChatsViewModel
+import com.invorel.blankchatpro.viewModels.MessageUIModel
 
 @SuppressLint("UnrememberedMutableInteractionSource", "CoroutineCreationDuringComposition")
 @Composable
@@ -90,24 +92,27 @@ fun ChatScreen(
     if (chatRoomId.isNotEmpty()) {
       //Comes from Home Screen
       viewModel.updateChatRoomId(chatRoomId)
-      viewModel.getMessagesOfCurrentChatRoomInBackend()
+      viewModel.getLocalMessagesForTheChatRoom()
+      viewModel.listenMessageUpdatesInCurrentChatRoomUpdateIfNeeded()
     } else {
       //Comes from Contacts Screen
-      //Todo check if the picked users already exists in Home Chat. if yes load previous messages
-      viewModel.clearPreviousChatDetails()
+      viewModel.checkIfAlreadyChatRoomExists()
+      if (localContactPhoto != null) {
+        viewModel.updateLocalReceiverImage()
+      }
     }
   }
 
   //Navigates to the last message in chat when we enter this screen for the first time
-  LaunchedEffect(key1 = state.messagesList) {
-    if (state.messagesList.isNotEmpty()){
+  LaunchedEffect(state.messagesList) {
+    if (state.messagesList.isNotEmpty()) {
       chatListState.scrollToItem(state.messagesList.lastIndex)
     }
   }
 
   LaunchedEffect(keyboardState) {
     if (keyboardState == Keyboard.Opened) {
-      if (state.messagesList.isNotEmpty()){
+      if (state.messagesList.isNotEmpty()) {
         chatListState.scrollToItem(state.messagesList.lastIndex)
       }
     }
@@ -124,19 +129,27 @@ fun ChatScreen(
     viewModel.updateSenderDetails()
   }
 
+  BackPressHandler {
+    viewModel.cancelListeningMessageFromFirebase()
+    onBackClick.invoke()
+  }
+
   Column(
     modifier = modifier,
     horizontalAlignment = Alignment.CenterHorizontally
   ) {
 
     ChatScreenContactInfo(
-      localContactPhoto  =localContactPhoto,
+      localContactPhoto = localContactPhoto,
       isFromHomeScreen = isCameFromHomeScreen,
       receiverDetails = receiverDetails,
       onContactsSettingsClicked = {
         context.showToast("Settings Clicked")
       },
-      onBackArrowClicked = onBackClick
+      onBackArrowClicked = {
+        viewModel.cancelListeningMessageFromFirebase()
+        onBackClick.invoke()
+      }
     )
 
     VerticalSpacer(space = 20)
@@ -159,10 +172,13 @@ fun ChatScreen(
       verticalAlignment = Alignment.CenterVertically,
     ) {
 
+      val currentTypedMessage = viewModel.currentTypedMessage.collectAsState().value
+
       BlankTextField(
         modifier = Modifier.weight(1f),
-        value = state.currentMessage.message,
+        value = currentTypedMessage,
         onValueChanged = {
+          viewModel.updateCurrentTypedMessage(it)
           viewModel.updateCurrentMessage(viewModel.uiState.value.currentMessage.copy(message = it))
         },
         onClearClicked = { },
@@ -174,16 +190,35 @@ fun ChatScreen(
 
       HorizontalSpacer(space = 6)
 
-      val disableSendButton = state.currentMessage.message.isEmpty() || state.isMessageUpdateInProgress
+      val disableSendButton =
+        currentTypedMessage.isEmpty() || state.isMessageUpdateInProgress
+
+      val owner = LocalLifecycleOwner.current
 
       Icon(
         modifier = Modifier
           .size(35.dp)
-          .clickable(indication = null, interactionSource = MutableInteractionSource(), onClick = {
-            if (disableSendButton.not()) {
-              viewModel.updateCurrentMessageInBackEnd()
-            }
-          }),
+          .clickable
+            (
+            indication = null,
+            interactionSource = MutableInteractionSource(),
+            onClick = {
+              if (disableSendButton.not()) {
+                if (viewModel.currentChatRoomId.value.isEmpty()) {
+                  viewModel.saveLocalChatRoomDetails(
+                    NetWorkUtils.isNetworkConnected(context = context),
+                    context = context,
+                    owner = owner
+                  )
+                } else {
+                  viewModel.saveMessageDetails(
+                    context = context,
+                    roomId = viewModel.currentChatRoomId.value,
+                    owner = owner
+                  )
+                }
+              }
+            }),
         painter = painterResource(id = drawable.sms_send_ic),
         contentDescription = stringResource(
           string.cd_sms_send_icon
@@ -242,7 +277,8 @@ fun ChatScreenContactInfo(
       modifier = modifier
         .size(55.dp)
         .clip(RoundedCornerShape(10.dp)),
-      model = if (isFromHomeScreen) receiverDetails.photo.ifEmpty { DEFAULT_PROFILE_MAN_IMAGE } else localContactPhoto ?: DEFAULT_PROFILE_MAN_IMAGE,
+      model = if (isFromHomeScreen) receiverDetails.photo.ifEmpty { DEFAULT_PROFILE_MAN_IMAGE } else localContactPhoto
+        ?: DEFAULT_PROFILE_MAN_IMAGE,
       contentDescription = stringResource(string.cd_chat_profile_photo),
       contentScale = Companion.Crop
     )
@@ -283,7 +319,7 @@ fun ChatScreenContactInfo(
 @Composable
 fun MessageItem(
   modifier: Modifier = Modifier,
-  details: Message,
+  details: MessageUIModel,
 ) {
 
   val context = LocalContext.current
@@ -332,9 +368,9 @@ fun MessageItem(
             color = black
           )
 
-          if (details.isMessageModeOn) {
+          if (details.isSentByMessageMode) {
             Box(modifier = Modifier.fillMaxHeight()) {
-              Icon(
+              /*Icon(
                 modifier = Modifier
                   .padding(start = 6.dp, top = 15.dp)
                   .align(Alignment.BottomCenter)
@@ -342,6 +378,11 @@ fun MessageItem(
                 imageVector = Icons.Filled.Email,
                 contentDescription = stringResource(string.cd_offline_message_icon),
                 tint = black
+              )*/
+              //todo remove below text after testing
+              Text(
+                text = details.status.toString(),
+                color = black
               )
             }
           }
@@ -401,6 +442,7 @@ fun keyboardAsState(): State<Keyboard> {
 }
 
 enum class Keyboard {
-  Opened, Closed
+  Opened,
+  Closed
 }
 

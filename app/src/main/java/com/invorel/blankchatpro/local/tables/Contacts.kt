@@ -7,8 +7,8 @@ import com.invorel.blankchatpro.constants.DEFAULT_CONTACT_TABLE_NAME
 
 @Entity(tableName = DEFAULT_CONTACT_TABLE_NAME)
 data class Contacts(
-  @PrimaryKey(autoGenerate = false) val id: Long,
+  @PrimaryKey val number: String,
+  val id: Long,
   val name: String,
-  val number: String,
   val photo: Bitmap?,
 )

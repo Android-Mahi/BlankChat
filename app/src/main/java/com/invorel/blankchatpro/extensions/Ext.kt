@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.core.app.ActivityCompat
+import com.invorel.blankchatpro.constants.DEFAULT_CHAT_ROOM_SEPARATOR
 import com.invorel.blankchatpro.constants.RECEIVER_NAME_MAX_LENGTH_IN_CHAT
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
@@ -57,3 +58,9 @@ fun String.buildProperPhoneNumber(): String {
 }
 
 fun String.trimNameToMaxLength() = this.take(RECEIVER_NAME_MAX_LENGTH_IN_CHAT).plus("..")
+
+fun String.isNumberTypeChatRoom(): Boolean {
+  val participants = this.split(DEFAULT_CHAT_ROOM_SEPARATOR)
+  //country code +91 included in size
+  return participants.first().length == 13 && participants.last().length == 13
+}

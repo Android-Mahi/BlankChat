@@ -12,6 +12,8 @@ import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.auth.PhoneAuthProvider.ForceResendingToken
 import com.invorel.blankchatpro.constants.DEFAULT_OTP_RESEND_TIME_SECONDS
 import com.invorel.blankchatpro.constants.DataStoreManager
+import com.invorel.blankchatpro.local.repo.LocalRepo
+import com.invorel.blankchatpro.local.tables.LocalUser
 import com.invorel.blankchatpro.online.fb_collections.User
 import com.invorel.blankchatpro.state.LoginUiState
 import com.invorel.blankchatpro.utils.FirebaseUtils
@@ -21,7 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-class LoginViewModel(private val dataStore: DataStore<Preferences>) : ViewModel() {
+class LoginViewModel(private val dataStore: DataStore<Preferences>, private val localRepo: LocalRepo) : ViewModel() {
 
   private val _uiState = MutableStateFlow(LoginUiState())
   val uiState = _uiState.asStateFlow()
@@ -158,12 +160,26 @@ class LoginViewModel(private val dataStore: DataStore<Preferences>) : ViewModel(
           return@signInWithPhoneAuthCredentials
         }
 
-        saveUserDetailsInBackend(
-          fbUser = fbUser,
-          onUserDetailsUpdatedInBacked = { updateSignInSuccess() }
+        val localUser = LocalUser(
+          userId = fbUser.uid,
+          lastRoomCreatedAt = -1,
+          number = uiState.value.phoneNo
         )
 
-        hideLoading()
+          localRepo.saveUserDetails(
+            scope = viewModelScope,
+            user = localUser,
+            onFailed = ::updateErrorMessage,
+            onSuccess = {
+              saveUserDetailsInBackend(
+                fbUser = fbUser,
+                onUserDetailsUpdatedInBacked = { updateSignInSuccess() }
+              )
+
+              hideLoading()
+            }
+          )
+
       }, onSignInFailed = {
         updateErrorMessage(it)
         hideLoading()

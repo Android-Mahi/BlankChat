@@ -5,6 +5,8 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStoreFile
+import androidx.work.Configuration
+import androidx.work.WorkManager
 import com.invorel.blankchatpro.constants.DEFAULT_DATA_STORE_FILE_NAME
 import com.invorel.blankchatpro.constants.DataStoreManager
 import com.invorel.blankchatpro.extensions.showToast
@@ -14,13 +16,11 @@ import com.invorel.blankchatpro.utils.FirebaseUtils
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 
-class BlankApp : Application() {
+class BlankApp : Application(), Configuration.Provider {
 
   lateinit var dataStore: DataStore<Preferences>
 
   lateinit var localDb: BlankLocalDatabase
-
-
 
   override fun onCreate() {
     super.onCreate()
@@ -33,10 +33,10 @@ class BlankApp : Application() {
 
     FirebaseUtils.getCurrentFCMToken(
       onTokenFetched = { token ->
-       saveFCMTokenInDataStore(token)
-    }, onTokenFetchFailed = { errorMessage ->
-      showToast(errorMessage)
-    })
+        saveFCMTokenInDataStore(token)
+      }, onTokenFetchFailed = { errorMessage ->
+        showToast(errorMessage)
+      })
   }
 
   fun saveFCMTokenInDataStore(token: String) {
@@ -49,5 +49,14 @@ class BlankApp : Application() {
   override fun onTerminate() {
     super.onTerminate()
     LocalDbManager.getDatabase(this).close()
+  }
+
+  override fun getWorkManagerConfiguration(): Configuration {
+    val customConfig = Configuration.Builder()
+      .setMinimumLoggingLevel(android.util.Log.INFO)
+      .build()
+
+    WorkManager.initialize(this, customConfig)
+    return customConfig
   }
 }
